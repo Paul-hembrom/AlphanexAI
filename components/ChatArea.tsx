@@ -279,7 +279,7 @@ export default function ChatArea({
                       </div>
                     </div>
 
-                    {/* Thinking / Reasoning Accordion (Claude 3.7 / DeepSeek-R1 style) */}
+                    {/* Thinking / Reasoning Accordion (MoE & Hybrid Thinking style) */}
                     {(message.thinkingContent || message.isThinking) && (
                       <div
                         id={`thinking-block-${message.id}`}

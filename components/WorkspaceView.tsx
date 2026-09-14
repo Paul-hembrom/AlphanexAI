@@ -9,6 +9,7 @@ import CanvasDrawer from '@/components/CanvasDrawer';
 import ParameterDrawer from '@/components/ParameterDrawer';
 import PaymentModal from '@/components/PaymentModal';
 import SettingsModal, { SettingsTabId } from '@/components/settings/SettingsModal';
+import MCPConnectorsModal from '@/components/connectors/MCPConnectorsModal';
 import {
   WorkMode,
   ModelInfo,
@@ -94,7 +95,7 @@ export default function WorkspaceView() {
 
   // Model State
   const [selectedModel, setSelectedModel] = useState<ModelInfo>(
-    AVAILABLE_MODELS.find((m) => m.id === 'claude-3-7-sonnet') || AVAILABLE_MODELS[0]
+    AVAILABLE_MODELS.find((m) => m.id === 'qwen-3-8-flash') || AVAILABLE_MODELS[0]
   );
 
   // Reasoning Effort State
@@ -108,6 +109,7 @@ export default function WorkspaceView() {
   // User Profile & Settings Modal State
   const [userProfile, setUserProfile] = useState<UserProfileSettings>(INITIAL_USER_PROFILE);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  const [isConnectorsModalOpen, setIsConnectorsModalOpen] = useState(false);
   const [settingsInitialTab, setSettingsInitialTab] = useState<SettingsTabId>('profile');
 
   // Sidebar & Threads State
@@ -205,6 +207,25 @@ export default function WorkspaceView() {
         const foundDiff = storedThreads[0].messages.find((m) => m.diffData)?.diffData;
         if (foundDiff) {
           setActiveDiffData(foundDiff);
+        }
+      }
+
+      if (typeof window !== 'undefined') {
+        try {
+          const searchParams = new URLSearchParams(window.location.search);
+          const modelParam = searchParams.get('model');
+          if (modelParam) {
+            const matched = AVAILABLE_MODELS.find((m) => m.id === modelParam);
+            if (matched) {
+              setSelectedModel(matched);
+            }
+          }
+          const modeParam = searchParams.get('mode') as WorkMode | null;
+          if (modeParam && (modeParam === 'developer' || modeParam === 'researcher' || modeParam === 'general')) {
+            setCurrentMode(modeParam);
+          }
+        } catch {
+          // ignore URL parsing issues
         }
       }
     });
@@ -399,8 +420,8 @@ export default function WorkspaceView() {
       timestamp: Date.now(),
       mode: currentMode,
       modelId: selectedModel.id,
-      reasoningEffort: selectedModel.supportsThinking ? reasoningEffort : undefined,
-      isThinking: selectedModel.supportsThinking,
+      reasoningEffort: currentMode === 'researcher' || selectedModel.supportsThinking ? reasoningEffort : undefined,
+      isThinking: currentMode === 'researcher' || selectedModel.supportsThinking,
       thinkingContent: '',
     };
 
@@ -420,7 +441,7 @@ export default function WorkspaceView() {
           prompt: userText,
           mode: currentMode,
           modelId: selectedModel.id,
-          reasoningEffort: selectedModel.supportsThinking ? reasoningEffort : undefined,
+          reasoningEffort: currentMode === 'researcher' || selectedModel.supportsThinking ? reasoningEffort : undefined,
           params: workspaceParams,
           history: messages.slice(-6).map((m) => ({ role: m.role, content: m.content })),
         }),
@@ -736,6 +757,7 @@ export default function WorkspaceView() {
           setSettingsInitialTab('profile');
           setIsSettingsModalOpen(true);
         }}
+        onOpenConnectors={() => setIsConnectorsModalOpen(true)}
         profile={userProfile}
       />
 
@@ -1004,6 +1026,12 @@ export default function WorkspaceView() {
         onExportData={() => {}}
         onClearHistory={handleClearAllThreads}
         initialTab={settingsInitialTab}
+      />
+
+      {/* Model Context Protocol (MCP) Connectors Modal */}
+      <MCPConnectorsModal
+        isOpen={isConnectorsModalOpen}
+        onClose={() => setIsConnectorsModalOpen(false)}
       />
     </div>
   );

@@ -18,6 +18,7 @@ import {
   Mountain,
   Settings,
   Home,
+  Link2,
 } from 'lucide-react';
 import { WorkMode, ModelInfo, ReasoningEffort, UserWallet, ModelTier, UserProfileSettings } from '@/lib/types';
 import ModelSelector from './ModelSelector';
@@ -41,6 +42,7 @@ interface HeaderProps {
   isSidebarOpen?: boolean;
   onToggleSidebar?: () => void;
   onOpenSettings?: () => void;
+  onOpenConnectors?: () => void;
   profile?: UserProfileSettings;
 }
 
@@ -62,6 +64,7 @@ export default function Header({
   isSidebarOpen,
   onToggleSidebar,
   onOpenSettings,
+  onOpenConnectors,
   profile,
 }: HeaderProps) {
   return (
@@ -191,17 +194,21 @@ export default function Header({
             userCredits={wallet.credits}
             userPlan={wallet.plan}
             onOpenPaymentModal={onOpenPaymentModal}
+            currentMode={currentMode}
+            reasoningEffort={reasoningEffort}
+            onChangeEffort={onChangeEffort}
           />
         </div>
 
         {/* Right: Reasoning Effort, Wallet, Parameter Drawer, Canvas Toggle */}
         <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
-          {/* Reasoning Effort Pill (Claude 3.7 / Thinking style) */}
+          {/* Reasoning Effort Pill (Hybrid Thinking style) */}
           <EffortSlider
             effort={reasoningEffort}
             onChangeEffort={onChangeEffort}
             supportsThinking={selectedModel.supportsThinking}
             modelName={selectedModel.name}
+            currentMode={currentMode}
           />
 
           {/* User Wallet Widget (eSewa / Khalti top-up button) */}
@@ -244,6 +251,22 @@ export default function Header({
           >
             <Sliders className="w-4 h-4" />
           </button>
+
+          {/* MCP Connectors Trigger Button (Claude.ai customize/connectors style) */}
+          {onOpenConnectors && (
+            <button
+              id="header-mcp-connectors-btn"
+              type="button"
+              onClick={onOpenConnectors}
+              className="flex items-center gap-1.5 px-2 sm:px-2.5 py-1.5 rounded-lg border border-[#E5E2DC] bg-[#FBF9F5] hover:bg-[#F3EFEA] text-[#1F1E1D] text-xs font-medium transition-all shadow-xs cursor-pointer"
+              title="Customise Connectors: GitHub, Google Docs, Gmail & custom MCP tools"
+              aria-label="Customise MCP Connectors"
+            >
+              <Link2 className="w-3.5 h-3.5 text-emerald-600" />
+              <span className="hidden lg:inline font-semibold">Connectors</span>
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+            </button>
+          )}
 
           {/* Canvas & Artifacts Panel Toggle (Claude-style) */}
           <button

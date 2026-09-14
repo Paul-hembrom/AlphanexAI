@@ -23,11 +23,16 @@ import {
   GitBranch,
   Search,
   ExternalLink,
+  Table,
+  Lock,
 } from 'lucide-react';
+import { AVAILABLE_MODELS } from '@/lib/constants';
 
 export default function HomePage() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'developer' | 'researcher' | 'studio'>('developer');
+  const [modelTierFilter, setModelTierFilter] = useState<'all' | 'free' | 'lite' | 'plus' | 'pro_max'>('all');
+  const [showHomeSpecsModal, setShowHomeSpecsModal] = useState(false);
 
   return (
     <div className="min-h-screen bg-[#FBF9F5] text-[#1F1E1D] selection:bg-amber-200 selection:text-black antialiased font-sans">
@@ -205,7 +210,7 @@ export default function HomePage() {
             <div className="mt-8 pt-6 border-t border-[#E5E2DC]/80 flex flex-wrap items-center gap-6 text-xs text-[#736E67]">
               <div className="flex items-center gap-1.5">
                 <Check className="w-3.5 h-3.5 text-emerald-600" />
-                <span>Claude 3.7 Sonnet & Gemini 2.5</span>
+                <span>Qwen 3.8, DeepSeek V4 & Gemini 3.8</span>
               </div>
               <div className="flex items-center gap-1.5">
                 <Check className="w-3.5 h-3.5 text-emerald-600" />
@@ -260,7 +265,7 @@ export default function HomePage() {
                       <span className="px-2 py-0.5 text-[#736E67]">General</span>
                     </div>
                     <span className="text-[11px] font-medium text-[#736E67] font-mono">
-                      Claude 3.7 Sonnet (Thinking)
+                      Qwen 3.8 Flash (Hybrid Thinking)
                     </span>
                   </div>
 
@@ -588,7 +593,7 @@ export default function HomePage() {
                 <ul className="space-y-2 text-xs text-[#33302C]">
                   <li className="flex items-center gap-2">
                     <Check className="w-4 h-4 text-emerald-600" />
-                    <span>Real-time web search grounding enabled with Gemini 2.5 Flash</span>
+                    <span>Real-time web search grounding enabled with Qwen 3.8 Flash & Gemini 3.8 Flash</span>
                   </li>
                   <li className="flex items-center gap-2">
                     <Check className="w-4 h-4 text-emerald-600" />
@@ -691,96 +696,294 @@ export default function HomePage() {
       {/* Model Roster Section */}
       <section id="models" className="py-20 sm:py-24 border-b border-[#E5E2DC] bg-[#FAF8F4]">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="max-w-3xl mb-12">
-            <p className="text-xs uppercase tracking-widest font-mono text-[#736E67] mb-2 font-bold">
-              Frontier Models
-            </p>
-            <h2 className="text-3xl sm:text-4xl font-serif font-medium text-[#1F1E1D] mb-3">
-              One unified interface. Multiple state-of-the-art foundations.
-            </h2>
-            <p className="text-sm sm:text-base text-[#55504A]">
-              Access Claude, Gemini, DeepSeek, and OpenAI foundation models without juggling separate accounts or subscriptions.
-            </p>
+          <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-10">
+            <div className="max-w-3xl">
+              <p className="text-xs uppercase tracking-widest font-mono text-[#736E67] mb-2 font-bold flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-amber-600" />
+                <span>Next-Gen Frontier Roster</span>
+              </p>
+              <h2 className="text-3xl sm:text-4xl font-serif font-medium text-[#1F1E1D] mb-3">
+                One unified interface. Multi-tier foundation intelligence.
+              </h2>
+              <p className="text-sm sm:text-base text-[#55504A]">
+                Access the latest generation of hybrid-thinking, MoE, and frontier reasoning models from Qwen, DeepSeek, Google, OpenAI, Moonshot, and Anthropic.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => setShowHomeSpecsModal(true)}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white border border-[#DDD8CE] text-xs font-semibold text-[#1F1E1D] hover:bg-[#F3EFEA] transition-colors shadow-2xs"
+              >
+                <Table className="w-3.5 h-3.5 text-blue-600" />
+                <span>Specs & Pricing Matrix</span>
+              </button>
+            </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-            {/* Model 1 */}
-            <div className="p-6 rounded-2xl bg-white border border-[#E5E2DC] shadow-2xs hover:border-[#B8B2A6] transition-all">
-              <div className="flex items-center justify-between mb-4">
-                <span className="text-xs font-mono font-bold px-2 py-0.5 rounded bg-blue-50 text-blue-800">
-                  Anthropic
-                </span>
-                <span className="text-xs font-mono text-amber-700 font-bold">Pro</span>
-              </div>
-              <h3 className="text-lg font-bold text-[#1F1E1D] mb-1">Claude 3.7 Sonnet</h3>
-              <p className="text-xs text-[#736E67] mb-4">
-                Hybrid reasoning model combining instantaneous coding agility with deep contemplative thought tracks.
-              </p>
-              <div className="text-[11px] text-[#55504A] space-y-1 pt-3 border-t border-[#EFECE6]">
-                <div>&bull; 200k context window</div>
-                <div>&bull; Extended thinking tokens</div>
-                <div>&bull; 10 credits / query</div>
-              </div>
-            </div>
+          {/* Tier Filter Tabs */}
+          <div className="flex flex-wrap items-center gap-2 mb-8 border-b border-[#E5E2DC] pb-4">
+            <button
+              type="button"
+              onClick={() => setModelTierFilter('all')}
+              className={`px-3.5 py-1.5 rounded-full text-xs font-medium transition-all ${
+                modelTierFilter === 'all'
+                  ? 'bg-[#1F1E1D] text-white shadow-xs'
+                  : 'bg-white text-[#736E67] border border-[#E5E2DC] hover:border-[#B8B2A6]'
+              }`}
+            >
+              All Models ({AVAILABLE_MODELS.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setModelTierFilter('free')}
+              className={`px-3.5 py-1.5 rounded-full text-xs font-medium transition-all flex items-center gap-1.5 ${
+                modelTierFilter === 'free'
+                  ? 'bg-emerald-700 text-white shadow-xs'
+                  : 'bg-white text-emerald-800 border border-emerald-200 hover:bg-emerald-50'
+              }`}
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+              <span>Free Tier (2)</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setModelTierFilter('lite')}
+              className={`px-3.5 py-1.5 rounded-full text-xs font-medium transition-all flex items-center gap-1.5 ${
+                modelTierFilter === 'lite'
+                  ? 'bg-teal-700 text-white shadow-xs'
+                  : 'bg-white text-teal-800 border border-teal-200 hover:bg-teal-50'
+              }`}
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-teal-400" />
+              <span>Lite Tier (2)</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setModelTierFilter('plus')}
+              className={`px-3.5 py-1.5 rounded-full text-xs font-medium transition-all flex items-center gap-1.5 ${
+                modelTierFilter === 'plus'
+                  ? 'bg-blue-700 text-white shadow-xs'
+                  : 'bg-white text-blue-800 border border-blue-200 hover:bg-blue-50'
+              }`}
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-blue-400" />
+              <span>Plus Tier (4)</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setModelTierFilter('pro_max')}
+              className={`px-3.5 py-1.5 rounded-full text-xs font-medium transition-all flex items-center gap-1.5 ${
+                modelTierFilter === 'pro_max'
+                  ? 'bg-amber-700 text-white shadow-xs'
+                  : 'bg-white text-amber-800 border border-amber-200 hover:bg-amber-50'
+              }`}
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+              <span>Pro / Max Tier (3)</span>
+            </button>
+          </div>
 
-            {/* Model 2 */}
-            <div className="p-6 rounded-2xl bg-white border border-[#E5E2DC] shadow-2xs hover:border-[#B8B2A6] transition-all">
-              <div className="flex items-center justify-between mb-4">
-                <span className="text-xs font-mono font-bold px-2 py-0.5 rounded bg-emerald-50 text-emerald-800">
-                  Google DeepMind
-                </span>
-                <span className="text-xs font-mono text-emerald-700 font-bold">Free Tier</span>
-              </div>
-              <h3 className="text-lg font-bold text-[#1F1E1D] mb-1">Gemini 2.5 Flash</h3>
-              <p className="text-xs text-[#736E67] mb-4">
-                Ultra-fast reasoning workhorse with real-time web search grounding and massive multi-modal comprehension.
-              </p>
-              <div className="text-[11px] text-[#55504A] space-y-1 pt-3 border-t border-[#EFECE6]">
-                <div>&bull; 1M+ token context</div>
-                <div>&bull; Live Google web search</div>
-                <div>&bull; 0 credits (Included free)</div>
-              </div>
-            </div>
+          {/* Models Grid */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
+            {AVAILABLE_MODELS.filter((m) => {
+              if (modelTierFilter === 'free') return m.tier === 'free';
+              if (modelTierFilter === 'lite') return m.tier === 'lite';
+              if (modelTierFilter === 'plus') return m.tier === 'plus';
+              if (modelTierFilter === 'pro_max') return m.tier === 'pro_max';
+              return true;
+            }).map((model) => {
+              const tierBadgeColor =
+                model.tier === 'free'
+                  ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                  : model.tier === 'lite'
+                  ? 'bg-teal-50 text-teal-800 border-teal-200'
+                  : model.tier === 'plus'
+                  ? 'bg-blue-50 text-blue-800 border-blue-200'
+                  : 'bg-amber-50 text-amber-800 border-amber-200';
 
-            {/* Model 3 */}
-            <div className="p-6 rounded-2xl bg-white border border-[#E5E2DC] shadow-2xs hover:border-[#B8B2A6] transition-all">
-              <div className="flex items-center justify-between mb-4">
-                <span className="text-xs font-mono font-bold px-2 py-0.5 rounded bg-purple-50 text-purple-800">
-                  DeepSeek
-                </span>
-                <span className="text-xs font-mono text-amber-700 font-bold">Pro</span>
-              </div>
-              <h3 className="text-lg font-bold text-[#1F1E1D] mb-1">DeepSeek R1</h3>
-              <p className="text-xs text-[#736E67] mb-4">
-                Open frontier reasoning model exhibiting exceptional mathematical, algorithm, and logic verification power.
-              </p>
-              <div className="text-[11px] text-[#55504A] space-y-1 pt-3 border-t border-[#EFECE6]">
-                <div>&bull; 128k context window</div>
-                <div>&bull; Full CoT verification</div>
-                <div>&bull; 8 credits / query</div>
-              </div>
-            </div>
+              const tierLabel =
+                model.tier === 'free'
+                  ? 'Free Tier'
+                  : model.tier === 'lite'
+                  ? 'Lite Tier'
+                  : model.tier === 'plus'
+                  ? 'Plus Tier'
+                  : 'Pro / Max';
 
-            {/* Model 4 */}
-            <div className="p-6 rounded-2xl bg-white border border-[#E5E2DC] shadow-2xs hover:border-[#B8B2A6] transition-all">
-              <div className="flex items-center justify-between mb-4">
-                <span className="text-xs font-mono font-bold px-2 py-0.5 rounded bg-neutral-100 text-neutral-800">
-                  OpenAI
-                </span>
-                <span className="text-xs font-mono text-amber-700 font-bold">Pro</span>
-              </div>
-              <h3 className="text-lg font-bold text-[#1F1E1D] mb-1">GPT-4o Omni</h3>
-              <p className="text-xs text-[#736E67] mb-4">
-                Flagship multi-modal omni model known for balanced human-like dialogue, synthesis, and creative versatility.
-              </p>
-              <div className="text-[11px] text-[#55504A] space-y-1 pt-3 border-t border-[#EFECE6]">
-                <div>&bull; 128k context window</div>
-                <div>&bull; Vision & code analysis</div>
-                <div>&bull; 12 credits / query</div>
-              </div>
-            </div>
+              return (
+                <div
+                  key={model.id}
+                  className="flex flex-col justify-between p-5 rounded-2xl bg-white border border-[#E5E2DC] shadow-2xs hover:border-[#B8B2A6] hover:shadow-md transition-all group"
+                >
+                  <div>
+                    {/* Top Tag & Tier Pill */}
+                    <div className="flex items-center justify-between gap-2 mb-3">
+                      <span className="text-[10px] font-mono font-medium px-2 py-0.5 rounded bg-[#F5F2EC] text-[#635E58] border border-[#E5E2DC] truncate max-w-[130px]">
+                        {model.provider}
+                      </span>
+                      <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded border ${tierBadgeColor}`}>
+                        {tierLabel}
+                      </span>
+                    </div>
+
+                    {/* Model Name & Badges */}
+                    <h3 className="text-base font-bold text-[#1F1E1D] group-hover:text-black transition-colors mb-1.5 flex items-center justify-between">
+                      <span>{model.name}</span>
+                    </h3>
+
+                    {/* Context and Thinking Badges */}
+                    <div className="flex flex-wrap items-center gap-1.5 mb-3 text-[10px] font-mono">
+                      <span className="px-1.5 py-0.5 rounded bg-[#F7F5F0] text-[#736E67] border border-[#EBE7DF]">
+                        {model.contextWindow}
+                      </span>
+                      {model.supportsThinking && (
+                        <span className="px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 border border-purple-200 font-semibold flex items-center gap-1">
+                          <Sparkles className="w-2.5 h-2.5" /> Thinking
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Pricing Pill */}
+                    <div className="p-2 rounded-xl bg-[#FAF8F4] border border-[#EFECE6] mb-3 text-[11px] font-mono space-y-0.5">
+                      <div className="flex items-center justify-between text-[#736E67]">
+                        <span>Input:</span>
+                        <span className="font-semibold text-[#1F1E1D]">{model.inputPrice}</span>
+                      </div>
+                      <div className="flex items-center justify-between text-[#736E67]">
+                        <span>Output:</span>
+                        <span className="font-semibold text-[#1F1E1D]">{model.outputPrice}</span>
+                      </div>
+                    </div>
+
+                    {/* Differentiators */}
+                    <p className="text-xs text-[#55504A] leading-relaxed mb-4 line-clamp-3">
+                      {model.differentiators}
+                    </p>
+                  </div>
+
+                  {/* Launch CTA */}
+                  <div className="pt-3 border-t border-[#EFECE6]">
+                    <Link
+                      href={`/workspace?model=${model.id}`}
+                      className="w-full inline-flex items-center justify-between px-3 py-2 rounded-xl bg-[#F7F5F0] hover:bg-[#1F1E1D] text-[#1F1E1D] hover:text-white text-xs font-semibold transition-all group-hover:bg-[#1F1E1D] group-hover:text-white"
+                    >
+                      <span>Try in Workspace</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </Link>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
+
+        {/* Home Specs & Pricing Matrix Modal */}
+        {showHomeSpecsModal && (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+            <div className="bg-[#FAF8F4] border border-[#D5D0C7] rounded-3xl w-full max-w-5xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
+              <div className="p-5 sm:p-6 border-b border-[#E5E2DC] bg-[#F3EFEA] flex items-center justify-between">
+                <div>
+                  <h3 className="text-lg font-serif font-bold text-[#1F1E1D] flex items-center gap-2">
+                    <Table className="w-5 h-5 text-blue-600" />
+                    <span>Complete Frontier Model Specifications & Pricing</span>
+                  </h3>
+                  <p className="text-xs text-[#736E67]">
+                    Official rate matrix per 1 Million tokens, architectural differentiators, and context capacities.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowHomeSpecsModal(false)}
+                  className="p-1.5 rounded-lg hover:bg-[#E5E2DC] text-[#736E67]"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="overflow-auto p-4 sm:p-6 text-xs font-sans">
+                <table className="w-full border-collapse">
+                  <thead>
+                    <tr className="border-b-2 border-[#D5D0C7] text-left text-[11px] font-mono text-[#736E67] uppercase">
+                      <th className="pb-3 pr-4">Model & Tier</th>
+                      <th className="pb-3 px-3">Provider</th>
+                      <th className="pb-3 px-3">Context</th>
+                      <th className="pb-3 px-3">Input / 1M</th>
+                      <th className="pb-3 px-3">Output / 1M</th>
+                      <th className="pb-3 px-3">Thinking</th>
+                      <th className="pb-3 pl-3">Differentiators</th>
+                      <th className="pb-3 pl-3">Launch</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[#E5E2DC]">
+                    {AVAILABLE_MODELS.map((m) => (
+                      <tr key={m.id} className="hover:bg-white/60 transition-colors">
+                        <td className="py-3 pr-4 font-semibold text-[#1F1E1D]">
+                          <div className="flex items-center gap-1.5">
+                            <span>{m.name}</span>
+                            <span
+                              className={`text-[9px] font-mono px-1.5 py-0.5 rounded font-bold ${
+                                m.tier === 'free'
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : m.tier === 'lite'
+                                  ? 'bg-teal-100 text-teal-800'
+                                  : m.tier === 'plus'
+                                  ? 'bg-blue-100 text-blue-800'
+                                  : 'bg-amber-100 text-amber-800'
+                              }`}
+                            >
+                              {m.tier === 'free' ? 'FREE' : m.tier === 'lite' ? 'LITE' : m.tier === 'plus' ? 'PLUS' : 'PRO/MAX'}
+                            </span>
+                          </div>
+                        </td>
+                        <td className="py-3 px-3 text-[#55504A] font-mono text-[11px]">{m.provider}</td>
+                        <td className="py-3 px-3 font-mono text-[11px]">{m.contextWindow}</td>
+                        <td className="py-3 px-3 font-mono text-[11px] text-emerald-800 font-semibold">
+                          {m.inputPrice}
+                        </td>
+                        <td className="py-3 px-3 font-mono text-[11px] text-blue-800 font-semibold">
+                          {m.outputPrice}
+                        </td>
+                        <td className="py-3 px-3 font-mono text-[11px]">
+                          {m.supportsThinking ? (
+                            <span className="px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 font-bold border border-purple-200">
+                              Yes
+                            </span>
+                          ) : (
+                            <span className="text-[#A39E96]">Autoregressive</span>
+                          )}
+                        </td>
+                        <td className="py-3 pl-3 text-[#55504A] max-w-xs text-[11px] leading-relaxed">
+                          {m.differentiators}
+                        </td>
+                        <td className="py-3 pl-3">
+                          <Link
+                            href={`/workspace?model=${m.id}`}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[#1F1E1D] text-white hover:bg-black text-[11px] font-medium transition-colors"
+                          >
+                            <span>Launch</span>
+                            <ArrowUpRight className="w-3 h-3 text-amber-400" />
+                          </Link>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="p-4 border-t border-[#E5E2DC] bg-[#F3EFEA] flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setShowHomeSpecsModal(false)}
+                  className="px-4 py-2 rounded-full bg-[#1F1E1D] text-white text-xs font-semibold hover:bg-black transition-colors"
+                >
+                  Close Matrix
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </section>
 
       {/* Localized Payments & Regional Ecosystem (eSewa & Khalti) */}
@@ -820,7 +1023,7 @@ export default function HomePage() {
             Step into the next tier of intelligence.
           </h2>
           <p className="text-base sm:text-xl text-[#55504A] font-normal max-w-2xl mx-auto mb-10 leading-relaxed">
-            Begin with Gemini 2.5 Flash for free, or unlock Claude 3.7 Sonnet thinking mode with instant side-by-side diffing.
+            Begin with Qwen 3.8 Flash or DeepSeek V4 for free, explore Laguna S 2.1, GLM 5.3 & DeepSeek V4.1 in Lite, or unlock Gemini 3.8 Flash, GPT-6 Astra, and Claude Opus 5 with instant side-by-side diffing.
           </p>
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
             <Link

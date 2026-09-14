@@ -34,7 +34,7 @@ export default function PaymentModal({
   initialIntendedTier,
 }: PaymentModalProps) {
   const [activeTab, setActiveTab] = useState<'plans' | 'vault'>(
-    initialIntendedTier === 'vault' ? 'vault' : 'plans'
+    initialIntendedTier === 'vault' || initialIntendedTier === 'pro_max' ? 'vault' : 'plans'
   );
   const [selectedPlan, setSelectedPlan] = useState<{
     id: string;
@@ -81,7 +81,7 @@ export default function PaymentModal({
       planType: 'Starter' as const,
       popular: false,
       features: [
-        'Full access to all Pro Models (Claude 3.7, GPT-4o, DeepSeek-R1)',
+        'Full access to Lite & Plus Tier Models (Laguna S 2.1, GLM 5.3 Flash, Gemini 3.8 Flash, DeepSeek V4 Pro, GPT-5.6 Sol)',
         '150 Credit Vault allowance',
         'Side-by-side Git Diff Analyzer',
         'Priority Kathmandu Cloud API routing',

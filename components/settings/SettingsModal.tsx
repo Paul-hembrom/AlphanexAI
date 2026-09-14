@@ -13,6 +13,7 @@ import {
   ShieldCheck,
   Command,
   Check,
+  Link2,
 } from 'lucide-react';
 import { UserProfileSettings, UserWallet } from '@/lib/types';
 import ProfileTab from './tabs/ProfileTab';
@@ -22,6 +23,7 @@ import DeveloperTab from './tabs/DeveloperTab';
 import ResearcherTab from './tabs/ResearcherTab';
 import AppearanceTab from './tabs/AppearanceTab';
 import SecurityTab from './tabs/SecurityTab';
+import ConnectorsTab from './tabs/ConnectorsTab';
 
 export type SettingsTabId =
   | 'profile'
@@ -29,6 +31,7 @@ export type SettingsTabId =
   | 'instructions'
   | 'developer'
   | 'researcher'
+  | 'connectors'
   | 'appearance'
   | 'security';
 
@@ -50,6 +53,7 @@ const TABS: { id: SettingsTabId; label: string; icon: any; category: string }[] 
   { id: 'instructions', label: 'Custom Instructions', icon: Sliders, category: 'System Personality' },
   { id: 'developer', label: 'Developer & Runtime', icon: Code2, category: 'Developer Mode' },
   { id: 'researcher', label: 'Researcher & Grounding', icon: Globe, category: 'Researcher Mode' },
+  { id: 'connectors', label: 'MCP & Integrations', icon: Link2, category: 'External Context' },
   { id: 'appearance', label: 'Artifacts & Workspace', icon: Palette, category: 'Appearance & UI' },
   { id: 'security', label: 'Privacy & Active Sessions', icon: ShieldCheck, category: 'Security & Auditing' },
 ];
@@ -278,6 +282,8 @@ export default function SettingsModal({
                 onUpdateProfile={onUpdateProfile}
               />
             )}
+
+            {activeTab === 'connectors' && <ConnectorsTab />}
 
             {activeTab === 'appearance' && (
               <AppearanceTab

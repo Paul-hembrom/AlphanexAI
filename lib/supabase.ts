@@ -25,7 +25,7 @@ export const INITIAL_THREADS: ChatThread[] = [
     createdAt: STATIC_REF_TIME - 1000 * 60 * 15,
     updatedAt: STATIC_REF_TIME - 1000 * 60 * 10,
     mode: 'developer',
-    modelId: 'claude-3-7-sonnet',
+    modelId: 'deepseek-v4-1-flash',
     isPinned: true,
     snippet: 'EPAY v2 base64 digest and secret key verification',
     messages: [
@@ -36,7 +36,7 @@ export const INITIAL_THREADS: ChatThread[] = [
           'We are getting `INVALID_SIGNATURE` from the eSewa epay v2 UAT sandbox during checkout redirect. Can you review our HMAC-SHA256 generation logic?',
         timestamp: STATIC_REF_TIME - 1000 * 60 * 15,
         mode: 'developer',
-        modelId: 'claude-3-7-sonnet',
+        modelId: 'deepseek-v4-1-flash',
       },
       {
         id: 'msg-2',
@@ -51,7 +51,7 @@ export const INITIAL_THREADS: ChatThread[] = [
 I've generated a clean interactive diff for your review in the Dev Canvas drawer. Click **Open in Canvas** to inspect the live changes and run tests.`,
         timestamp: STATIC_REF_TIME - 1000 * 60 * 10,
         mode: 'developer',
-        modelId: 'claude-3-7-sonnet',
+        modelId: 'deepseek-v4-1-flash',
         diffData: INITIAL_DIFF_SAMPLE,
       },
     ],
@@ -62,7 +62,7 @@ I've generated a clean interactive diff for your review in the Dev Canvas drawer
     createdAt: STATIC_REF_TIME - 1000 * 60 * 120,
     updatedAt: STATIC_REF_TIME - 1000 * 60 * 95,
     mode: 'developer',
-    modelId: 'qwen-2.5-coder',
+    modelId: 'qwen-3-8-flash',
     snippet: 'Python normalizer for zero-width joiners and Chandrabindu',
     messages: [
       {
@@ -72,7 +72,7 @@ I've generated a clean interactive diff for your review in the Dev Canvas drawer
           'Write a fast Python normalizer for Nepali text datasets that removes orphaned Zero Width Joiners (U+200D) and canonicalizes Chandrabindu vs Anusvara.',
         timestamp: STATIC_REF_TIME - 1000 * 60 * 120,
         mode: 'developer',
-        modelId: 'qwen-2.5-coder',
+        modelId: 'qwen-3-8-flash',
       },
       {
         id: 'msg-4',
@@ -101,7 +101,7 @@ def normalize_nepali_text(text: str) -> str:
 This achieves zero regressions on the Nepali Sentiment Corpus benchmarks.`,
         timestamp: STATIC_REF_TIME - 1000 * 60 * 95,
         mode: 'developer',
-        modelId: 'qwen-2.5-coder',
+        modelId: 'qwen-3-8-flash',
       },
     ],
   },
@@ -111,7 +111,7 @@ This achieves zero regressions on the Nepali Sentiment Corpus benchmarks.`,
     createdAt: STATIC_REF_TIME - 1000 * 60 * 60 * 24,
     updatedAt: STATIC_REF_TIME - 1000 * 60 * 60 * 20,
     mode: 'researcher',
-    modelId: 'claude-3-7-sonnet',
+    modelId: 'gemini-3-8-flash',
     isPinned: true,
     snippet: 'MoCIT strategic framework & National Data Center status',
     messages: [
@@ -122,7 +122,7 @@ This achieves zero regressions on the Nepali Sentiment Corpus benchmarks.`,
           'Summarize the key recommendations of the MoCIT Nepal National AI Strategy Draft and high-speed research networking via NREN.',
         timestamp: STATIC_REF_TIME - 1000 * 60 * 60 * 24,
         mode: 'researcher',
-        modelId: 'claude-3-7-sonnet',
+        modelId: 'gemini-3-8-flash',
       },
       {
         id: 'msg-6',
@@ -139,7 +139,7 @@ Based on documentation from the **Ministry of Communication and Information Tech
    - 10Gbps interconnect between IOE Pulchowk, Kathmandu University, and NAST to support decentralized model inference.`,
         timestamp: STATIC_REF_TIME - 1000 * 60 * 60 * 20,
         mode: 'researcher',
-        modelId: 'claude-3-7-sonnet',
+        modelId: 'gemini-3-8-flash',
         citations: [
           {
             id: 'c-1',
@@ -167,7 +167,7 @@ Based on documentation from the **Ministry of Communication and Information Tech
     createdAt: STATIC_REF_TIME - 1000 * 60 * 60 * 72,
     updatedAt: STATIC_REF_TIME - 1000 * 60 * 60 * 70,
     mode: 'researcher',
-    modelId: 'deepseek-r1',
+    modelId: 'deepseek-v4-pro',
     snippet: 'Nepal Rastra Bank indicators: Fonepay, eSewa, Khalti',
     messages: [
       {
@@ -176,7 +176,7 @@ Based on documentation from the **Ministry of Communication and Information Tech
         content: 'What are the latest QR vs digital wallet transaction volumes reported by Nepal Rastra Bank?',
         timestamp: STATIC_REF_TIME - 1000 * 60 * 60 * 72,
         mode: 'researcher',
-        modelId: 'deepseek-r1',
+        modelId: 'deepseek-v4-pro',
       },
       {
         id: 'msg-8',
@@ -188,7 +188,7 @@ Based on documentation from the **Ministry of Communication and Information Tech
 * **Key Insight**: Interoperable QR transactions have surpassed peer-to-peer wallet transfers for merchant retail payments in urban centers like Kathmandu and Pokhara.`,
         timestamp: STATIC_REF_TIME - 1000 * 60 * 60 * 70,
         mode: 'researcher',
-        modelId: 'deepseek-r1',
+        modelId: 'deepseek-v4-pro',
       },
     ],
   },

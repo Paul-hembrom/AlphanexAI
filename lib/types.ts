@@ -1,8 +1,86 @@
 export type WorkMode = 'developer' | 'researcher' | 'general';
 
-export type ModelTier = 'free' | 'pro' | 'vault';
+export type ModelTier = 'free' | 'lite' | 'plus' | 'pro' | 'max' | 'pro_max' | 'vault';
 
-export type ReasoningEffort = 'Low' | 'Medium' | 'Max';
+export type ReasoningEffort = 'Low' | 'Medium' | 'High' | 'Extra' | 'Max';
+
+export type ResearchTier = 'low' | 'medium' | 'high' | 'extra' | 'max';
+
+export interface ResearchTierMeta {
+  id: ResearchTier;
+  label: string;
+  name: string;
+  multiplier: string;
+  multiplierVal: number;
+  tokens: number;
+  warningText: string;
+  credits: number;
+  badge: string;
+  color: string;
+}
+
+export const RESEARCH_TIERS_META: Record<ResearchTier, ResearchTierMeta> = {
+  low: {
+    id: 'low',
+    label: 'Low',
+    name: 'Fast Scan',
+    multiplier: '1x tokens',
+    multiplierVal: 1,
+    tokens: 2048,
+    warningText: 'Standard baseline token consumption (2,048 tokens)',
+    credits: 1,
+    badge: '1x Tokens',
+    color: 'emerald',
+  },
+  medium: {
+    id: 'medium',
+    label: 'Medium',
+    name: 'In-Depth Analysis',
+    multiplier: '2x tokens',
+    multiplierVal: 2,
+    tokens: 8192,
+    warningText: 'Uses 2x more tokens than Low tier (8,192 tokens)',
+    credits: 3,
+    badge: '⚠️ 2x Tokens',
+    color: 'blue',
+  },
+  high: {
+    id: 'high',
+    label: 'High',
+    name: 'Comprehensive Due Diligence',
+    multiplier: '4x tokens',
+    multiplierVal: 4,
+    tokens: 8192,
+    warningText: 'Uses 4x more tokens than Low tier with multi-pass search (8,192 tokens)',
+    credits: 8,
+    badge: '⚠️ 4x Tokens',
+    color: 'amber',
+  },
+  extra: {
+    id: 'extra',
+    label: 'Extra',
+    name: 'Intensive Deep Search',
+    multiplier: '6x tokens',
+    multiplierVal: 6,
+    tokens: 10240,
+    warningText: 'Uses 6x more tokens than Low tier with deep cross-verification (10,240 tokens)',
+    credits: 14,
+    badge: '⚠️ 6x Tokens',
+    color: 'orange',
+  },
+  max: {
+    id: 'max',
+    label: 'Max',
+    name: 'Exhaustive Audit Dossier',
+    multiplier: '10x tokens',
+    multiplierVal: 10,
+    tokens: 12288,
+    warningText: 'Uses 10x more tokens than Low tier with exhaustive sandbox audit (12,288 tokens)',
+    credits: 20,
+    badge: '🚨 10x Tokens',
+    color: 'red',
+  },
+};
 
 export interface ModelInfo {
   id: string;
@@ -14,6 +92,9 @@ export interface ModelInfo {
   costPerQueryCredits: number;
   badge?: string;
   description: string;
+  inputPrice?: string;
+  outputPrice?: string;
+  differentiators?: string;
 }
 
 export interface Citation {

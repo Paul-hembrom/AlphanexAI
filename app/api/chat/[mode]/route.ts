@@ -2,7 +2,9 @@ import { NextRequest } from 'next/server';
 import { GoogleGenAI } from '@google/genai';
 import { Citation, DiffData, WorkMode } from '@/lib/types';
 
+export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
 
 export async function POST(
   req: NextRequest,
@@ -14,7 +16,7 @@ export async function POST(
   const body = await req.json().catch(() => ({}));
   const {
     prompt = '',
-    modelId = 'deepseek-v3',
+    modelId = 'qwen-3-8-flash',
     history = [],
     params = {},
     reasoningEffort = 'Medium',
@@ -196,12 +198,20 @@ async function simulateStreamingResponse(
 ) {
   // Thinking phase
   const thinkingNotes = [
-    `Analyzing user query within ${mode.toUpperCase()} framework...`,
-    `Evaluating architectural tradeoffs and regional requirements (Nepal payment gateways / Kathmandu infrastructure / NRB compliance)...`,
-    `Allocating ${reasoningEffort} test-time reasoning budget (${
-      reasoningEffort === 'Low' ? '~1k tokens' : reasoningEffort === 'Medium' ? '~4k tokens' : '~16k tokens'
+    `Analyzing user query within ${mode.toUpperCase()} framework on ${modelId}...`,
+    `Evaluating architectural tradeoffs & querying MCP connectors (GitHub, Google Docs, Gmail)...`,
+    `Allocating ${reasoningEffort} test-time research budget (${
+      reasoningEffort === 'Low'
+        ? '~2,048 tokens (1x baseline)'
+        : reasoningEffort === 'Medium'
+        ? '~8,192 tokens (2x multiplier ⚠️)'
+        : reasoningEffort === 'High'
+        ? '~8,192 tokens (4x multiplier ⚠️)'
+        : reasoningEffort === 'Extra'
+        ? '~10,240 tokens (6x multiplier ⚠️ - increased research capacity)'
+        : '~12,288 tokens (10x multiplier 🚨 - exhaustive sandbox audit dossier)'
     })...`,
-    `Synthesizing response with high precision and verified citations...`,
+    `Synthesizing response with high precision, verified grounding citations, and MCP tool results...`,
   ];
 
   for (const note of thinkingNotes) {
