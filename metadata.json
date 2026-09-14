@@ -1,0 +1,6 @@
+{
+  "name": "AI Festa Studio",
+  "description": "Premier AI workspace tailored for developers and researchers in Nepal, fusing Claude minimalist aesthetic, Google AI Studio parameter inspector and code diffs, and multi-mode workflows.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

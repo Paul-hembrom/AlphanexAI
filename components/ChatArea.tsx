@@ -1,0 +1,542 @@
+'use client';
+
+import React, { useState, useRef, useEffect } from 'react';
+import {
+  Send,
+  Square,
+  Sparkles,
+  ExternalLink,
+  Code2,
+  Copy,
+  Check,
+  Brain,
+  ChevronDown,
+  ChevronUp,
+  RotateCcw,
+  Globe,
+  Terminal,
+  FileCode2,
+  CheckCircle2,
+  Zap,
+} from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import {
+  ChatMessage,
+  Citation,
+  DiffData,
+  WorkMode,
+  ModelInfo,
+} from '@/lib/types';
+import { SAMPLE_PROMPTS_BY_MODE } from '@/lib/constants';
+
+interface ChatAreaProps {
+  messages: ChatMessage[];
+  currentMode: WorkMode;
+  selectedModel: ModelInfo;
+  isStreaming: boolean;
+  onSendMessage: (text: string) => void;
+  onStopStreaming: () => void;
+  onOpenInCanvas: (diff?: DiffData, code?: string) => void;
+  onSelectPrompt: (prompt: string) => void;
+  userCredits: number;
+}
+
+export default function ChatArea({
+  messages,
+  currentMode,
+  selectedModel,
+  isStreaming,
+  onSendMessage,
+  onStopStreaming,
+  onOpenInCanvas,
+  onSelectPrompt,
+  userCredits,
+}: ChatAreaProps) {
+  const [inputText, setInputText] = useState('');
+  const [expandedThinking, setExpandedThinking] = useState<Record<string, boolean>>({});
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [activeCitationModal, setActiveCitationModal] = useState<Citation | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Auto-scroll on new message or stream update
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, isStreaming]);
+
+  // Adjust textarea height smoothly and compactly (Gemini chatbot / SMS single-line style)
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      if (!inputText) {
+        textareaRef.current.style.height = '24px';
+      } else {
+        const scrollH = textareaRef.current.scrollHeight;
+        const targetH = Math.min(Math.max(scrollH, 24), 110);
+        textareaRef.current.style.height = `${targetH}px`;
+      }
+    }
+  }, [inputText]);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!inputText.trim() || isStreaming) return;
+    onSendMessage(inputText.trim());
+    setInputText('');
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSubmit(e);
+    }
+  };
+
+  const toggleThinking = (messageId: string) => {
+    setExpandedThinking((prev) => ({
+      ...prev,
+      [messageId]: !prev[messageId],
+    }));
+  };
+
+  const handleCopy = (text: string, id: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedId(id);
+    setTimeout(() => setCopiedId(null), 2000);
+  };
+
+  const samplePrompts = SAMPLE_PROMPTS_BY_MODE[currentMode] || [];
+
+  return (
+    <div
+      id="chat-pane-container"
+      className="flex-1 flex flex-col h-full bg-[#FBF9F5] overflow-hidden relative"
+    >
+      {/* Citation Popover Modal */}
+      {activeCitationModal && (
+        <div
+          id="citation-preview-dialog"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30 backdrop-blur-2xs"
+          onClick={() => setActiveCitationModal(null)}
+        >
+          <div
+            className="bg-[#FBF9F5] border border-[#E5E2DC] rounded-xl max-w-md w-full p-4 shadow-xl space-y-3"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between pb-2 border-b border-[#E5E2DC]">
+              <div className="flex items-center gap-1.5 text-xs font-semibold text-emerald-800">
+                <Globe className="w-3.5 h-3.5 text-emerald-600" />
+                <span>{activeCitationModal.sourceName}</span>
+              </div>
+              <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-medium">
+                {activeCitationModal.reliabilityScore || 95}% Reliability
+              </span>
+            </div>
+            <div>
+              <h4 className="text-sm font-semibold text-[#1F1E1D]">
+                {activeCitationModal.title}
+              </h4>
+              <p className="text-xs text-[#55504A] mt-2 leading-relaxed bg-[#F3EFEA] p-2.5 rounded-lg border border-[#E5E2DC]">
+                &ldquo;{activeCitationModal.snippet}&rdquo;
+              </p>
+            </div>
+            <div className="flex items-center justify-between pt-1 text-xs">
+              <a
+                href={activeCitationModal.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-blue-700 hover:text-blue-800 font-medium flex items-center gap-1 hover:underline"
+              >
+                <span>Visit Source URL</span>
+                <ExternalLink className="w-3 h-3" />
+              </a>
+              <button
+                type="button"
+                onClick={() => setActiveCitationModal(null)}
+                className="px-3 py-1 rounded bg-[#EFECE6] hover:bg-[#E5E2DC] text-[#1F1E1D] font-medium"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Messages Stream Area */}
+      <div
+        id="chat-messages-stream"
+        className="flex-1 overflow-y-auto px-4 sm:px-8 py-6 space-y-6"
+      >
+        {messages.length === 0 ? (
+          /* Empty State / Welcome Screen with Nepal Specialized Prompts */
+          <div
+            id="chat-empty-welcome"
+            className="max-w-2xl mx-auto my-auto pt-6 pb-10 text-center space-y-6"
+          >
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#F3EFEA] border border-[#E5E2DC] text-xs font-medium text-[#736E67]">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              <span>
+                Running in {currentMode.charAt(0).toUpperCase() + currentMode.slice(1)} Mode on{' '}
+                <strong className="text-[#1F1E1D]">{selectedModel.name}</strong>
+              </span>
+            </div>
+
+            <div className="space-y-2">
+              <h2 className="text-2xl sm:text-3xl font-serif font-medium text-[#1F1E1D] tracking-tight">
+                Welcome to AI Festa Studio
+              </h2>
+              <p className="text-sm text-[#736E67] max-w-lg mx-auto leading-relaxed">
+                The premier workspace fusing Claude&apos;s warm minimalist design, Google AI Studio&apos;s
+                rigorous inspector, and localized workflows for Nepal.
+              </p>
+            </div>
+
+            {/* Quick Starters Grid */}
+            <div className="pt-2 text-left space-y-2">
+              <div className="text-xs font-semibold text-[#858079] uppercase tracking-wider px-1">
+                Suggested {currentMode.charAt(0).toUpperCase() + currentMode.slice(1)} Queries:
+              </div>
+              <div className="grid grid-cols-1 gap-2.5">
+                {samplePrompts.map((item, idx) => (
+                  <button
+                    key={idx}
+                    id={`sample-prompt-btn-${idx}`}
+                    type="button"
+                    onClick={() => onSelectPrompt(item.prompt)}
+                    className="p-3.5 rounded-xl border border-[#E5E2DC] bg-[#FDFBF7] hover:bg-[#F3EFEA] hover:border-[#D5D0C7] text-left transition-all group flex items-start justify-between gap-3 shadow-2xs"
+                  >
+                    <div>
+                      <h4 className="text-xs sm:text-sm font-semibold text-[#1F1E1D] group-hover:text-blue-900 transition-colors">
+                        {item.title}
+                      </h4>
+                      <p className="text-xs text-[#736E67] mt-0.5 line-clamp-2 leading-relaxed">
+                        {item.prompt}
+                      </p>
+                    </div>
+                    <span className="text-[10px] px-2 py-0.5 rounded bg-[#ECE8E1] text-[#736E67] font-medium shrink-0 mt-0.5">
+                      {item.description}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        ) : (
+          messages.map((message) => {
+            const isAssistant = message.role === 'assistant';
+            const isUser = message.role === 'user';
+
+            return (
+              <div
+                key={message.id}
+                id={`chat-message-${message.id}`}
+                className={`flex flex-col ${isUser ? 'items-end' : 'items-start'} max-w-3xl mx-auto w-full`}
+              >
+                {/* User Prompt Bubble */}
+                {isUser && (
+                  <div className="max-w-[85%] bg-[#1F1E1D] text-[#FBF9F5] rounded-2xl rounded-tr-xs px-4 py-3 text-sm leading-relaxed shadow-sm">
+                    <p className="whitespace-pre-wrap">{message.content}</p>
+                  </div>
+                )}
+
+                {/* Assistant Bubble */}
+                {isAssistant && (
+                  <div className="w-full space-y-3">
+                    {/* Header meta badge */}
+                    <div className="flex items-center justify-between text-xs text-[#858079] pt-1">
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-semibold text-[#1F1E1D]">{selectedModel.name}</span>
+                        <span>&middot;</span>
+                        <span className="capitalize">{message.mode} Mode</span>
+                        {message.reasoningEffort && (
+                          <>
+                            <span>&middot;</span>
+                            <span className="text-amber-800 font-medium">
+                              {message.reasoningEffort} Reasoning
+                            </span>
+                          </>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleCopy(message.content, message.id)}
+                          className="hover:text-[#1F1E1D] flex items-center gap-1 text-[11px]"
+                          title="Copy response"
+                        >
+                          {copiedId === message.id ? (
+                            <>
+                              <Check className="w-3 h-3 text-emerald-600" />
+                              <span className="text-emerald-600">Copied</span>
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="w-3 h-3" />
+                              <span>Copy</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Thinking / Reasoning Accordion (Claude 3.7 / DeepSeek-R1 style) */}
+                    {(message.thinkingContent || message.isThinking) && (
+                      <div
+                        id={`thinking-block-${message.id}`}
+                        className="rounded-xl border border-[#E5E2DC] bg-[#F7F5F0] overflow-hidden text-xs"
+                      >
+                        <button
+                          type="button"
+                          onClick={() => toggleThinking(message.id)}
+                          className="w-full px-3 py-2 flex items-center justify-between text-[#55504A] hover:bg-[#EFECE6] transition-colors"
+                        >
+                          <div className="flex items-center gap-2">
+                            <Brain className="w-3.5 h-3.5 text-amber-700 animate-pulse" />
+                            <span className="font-semibold text-[#1F1E1D]">
+                              {message.isThinking ? 'Thinking...' : 'Reasoning Process'}
+                            </span>
+                            <span className="text-[10px] px-1.5 py-0.2 rounded bg-[#ECE8E1] text-[#736E67]">
+                              {message.reasoningEffort || 'Medium'} compute
+                            </span>
+                          </div>
+                          {expandedThinking[message.id] ? (
+                            <ChevronUp className="w-3.5 h-3.5 text-[#858079]" />
+                          ) : (
+                            <ChevronDown className="w-3.5 h-3.5 text-[#858079]" />
+                          )}
+                        </button>
+
+                        {(expandedThinking[message.id] || message.isThinking) && (
+                          <div className="p-3 border-t border-[#E5E2DC] text-[#736E67] font-mono text-[11px] leading-relaxed whitespace-pre-wrap bg-[#FAF8F3]">
+                            {message.thinkingContent || 'Synthesizing knowledge graph...'}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Researcher Mode Interactive Citation Chips */}
+                    {message.citations && message.citations.length > 0 && (
+                      <div
+                        id={`citation-chips-${message.id}`}
+                        className="p-2.5 rounded-xl border border-emerald-200/80 bg-emerald-50/50 space-y-1.5"
+                      >
+                        <div className="flex items-center gap-1.5 text-[11px] font-semibold text-emerald-900">
+                          <Globe className="w-3 h-3 text-emerald-700" />
+                          <span>Live Verified Sources & Citations:</span>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {message.citations.map((cite) => (
+                            <button
+                              key={cite.id}
+                              id={`citation-chip-${cite.id}`}
+                              type="button"
+                              onClick={() => setActiveCitationModal(cite)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-medium bg-[#FBF9F5] border border-emerald-300 text-emerald-900 hover:bg-emerald-100 hover:border-emerald-400 transition-all shadow-2xs group"
+                              title={`Click to preview: ${cite.title}`}
+                            >
+                              <span>[{cite.sourceName}]</span>
+                              <ExternalLink className="w-2.5 h-2.5 text-emerald-600 group-hover:translate-x-0.5 transition-transform" />
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Main Markdown Content */}
+                    <div className="text-sm text-[#1F1E1D] leading-relaxed space-y-3 prose prose-neutral max-w-none">
+                      <ReactMarkdown
+                        components={{
+                          code({ className, children, ...props }) {
+                            const match = /language-(\w+)/.exec(className || '');
+                            const codeString = String(children).replace(/\n$/, '');
+
+                            if (match) {
+                              return (
+                                <div className="my-3 rounded-xl border border-[#E5E2DC] overflow-hidden bg-[#1E1E1E] text-[#D4D4D4] shadow-sm">
+                                  {/* Code Block Header with Open in Canvas / View Diff */}
+                                  <div className="px-3 py-1.5 bg-[#252526] border-b border-[#333333] flex items-center justify-between text-xs text-[#CCCCCC]">
+                                    <div className="flex items-center gap-2">
+                                      <FileCode2 className="w-3.5 h-3.5 text-amber-400" />
+                                      <span className="font-mono text-[11px] font-medium text-[#E0E0E0]">
+                                        {match[1]}
+                                      </span>
+                                    </div>
+                                    <div className="flex items-center gap-1.5">
+                                      {/* Developer Mode: Open in Canvas / View Diff Button */}
+                                      {currentMode === 'developer' && (
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            onOpenInCanvas(message.diffData, codeString)
+                                          }
+                                          className="px-2 py-0.5 rounded bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-medium flex items-center gap-1 transition-colors shadow-2xs"
+                                          title="Inspect side-by-side diff or run in Pyodide WASM Terminal"
+                                        >
+                                          <Code2 className="w-3 h-3" />
+                                          <span>Open in Canvas / Diff</span>
+                                        </button>
+                                      )}
+                                      <button
+                                        type="button"
+                                        onClick={() => handleCopy(codeString, `code-${message.id}`)}
+                                        className="px-2 py-0.5 rounded hover:bg-[#3E3E42] text-[11px] text-[#AAAAAA] hover:text-white flex items-center gap-1"
+                                      >
+                                        {copiedId === `code-${message.id}` ? (
+                                          <Check className="w-3 h-3 text-emerald-400" />
+                                        ) : (
+                                          <Copy className="w-3 h-3" />
+                                        )}
+                                      </button>
+                                    </div>
+                                  </div>
+                                  {/* Code Body */}
+                                  <pre className="p-3.5 overflow-x-auto text-xs font-mono leading-relaxed bg-[#1E1E1E]">
+                                    <code>{children}</code>
+                                  </pre>
+                                </div>
+                              );
+                            }
+
+                            return (
+                              <code
+                                className="px-1.5 py-0.5 rounded bg-[#ECE8E1] text-[#B45309] font-mono text-[12px]"
+                                {...props}
+                              >
+                                {children}
+                              </code>
+                            );
+                          },
+                        }}
+                      >
+                        {message.content}
+                      </ReactMarkdown>
+                    </div>
+
+                    {/* Developer Mode Quick Diff Banner at bottom of message if present */}
+                    {message.diffData && currentMode === 'developer' && (
+                      <div
+                        id={`diff-callout-${message.id}`}
+                        className="p-3 rounded-xl border border-blue-200 bg-blue-50/60 flex items-center justify-between gap-3 text-xs"
+                      >
+                        <div className="flex items-center gap-2">
+                          <Code2 className="w-4 h-4 text-blue-700 shrink-0" />
+                          <div>
+                            <span className="font-semibold text-blue-950">
+                              Side-by-side Diff Ready: {message.diffData.filename}
+                            </span>
+                            <span className="ml-2 text-[10px] text-emerald-700 font-medium">
+                              +{message.diffData.additions || 12}
+                            </span>
+                            <span className="ml-1 text-[10px] text-red-700 font-medium">
+                              -{message.diffData.deletions || 5}
+                            </span>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => onOpenInCanvas(message.diffData)}
+                          className="px-3 py-1 rounded-lg bg-blue-700 hover:bg-blue-800 text-white font-semibold transition-colors shadow-2xs shrink-0"
+                        >
+                          View in Canvas &rarr;
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })
+        )}
+
+        {/* Live typing indicator while streaming */}
+        {isStreaming && (
+          <div className="flex items-center gap-2 text-xs text-[#736E67] max-w-3xl mx-auto pl-1">
+            <span className="w-2 h-2 rounded-full bg-amber-600 animate-pulse" />
+            <span className="italic">{selectedModel.name} is generating tokens...</span>
+          </div>
+        )}
+
+        <div ref={messagesEndRef} />
+      </div>
+
+      {/* Chat Input Dock - Gemini Chatbot / SMS Pill */}
+      <div
+        id="chat-input-dock"
+        className="px-3 sm:px-4 py-2 bg-[#FBF9F5] border-t border-[#E5E2DC]"
+      >
+        <div className="max-w-2xl mx-auto">
+          <form
+            onSubmit={handleSubmit}
+            className="flex items-center gap-1.5 px-2 py-1.5 rounded-full border border-[#E5E2DC] bg-[#FDFBF7] shadow-xs focus-within:border-[#A8A298] focus-within:ring-2 focus-within:ring-[#B8B2A6]/20 transition-all"
+          >
+            {/* Left Mode / Sparkle Pill */}
+            <div
+              className="shrink-0 flex items-center justify-center w-7 h-7 rounded-full bg-[#F0ECE4] text-[#4D4943] select-none"
+              title={`Mode: ${currentMode} · ${selectedModel.name}`}
+            >
+              {currentMode === 'developer' && <Code2 className="w-3.5 h-3.5 text-blue-600" />}
+              {currentMode === 'researcher' && <Globe className="w-3.5 h-3.5 text-emerald-600" />}
+              {currentMode === 'general' && <Sparkles className="w-3.5 h-3.5 text-amber-600" />}
+            </div>
+
+            {/* Inline Textarea */}
+            <textarea
+              ref={textareaRef}
+              id="chat-prompt-textarea"
+              value={inputText}
+              onChange={(e) => setInputText(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder={
+                currentMode === 'developer'
+                  ? 'Ask Gemini to write or debug code...'
+                  : currentMode === 'researcher'
+                  ? 'Ask Gemini to research or analyze data...'
+                  : 'Ask Gemini anything...'
+              }
+              rows={1}
+              className="flex-1 min-w-0 bg-transparent text-sm text-[#1F1E1D] placeholder-[#9E9890] resize-none outline-hidden font-normal py-0.5 px-2 min-h-[24px] max-h-[110px] leading-relaxed block"
+            />
+
+            {/* Right Action Button (SMS Circle) */}
+            <div className="shrink-0 flex items-center">
+              {isStreaming ? (
+                <button
+                  id="stop-streaming-btn"
+                  type="button"
+                  onClick={onStopStreaming}
+                  className="w-7 h-7 rounded-full bg-red-600 hover:bg-red-700 text-white flex items-center justify-center transition-all shadow-xs cursor-pointer active:scale-95"
+                  title="Stop generating"
+                  aria-label="Stop generation"
+                >
+                  <Square className="w-3 h-3 fill-current" />
+                </button>
+              ) : (
+                <button
+                  id="send-prompt-btn"
+                  type="submit"
+                  disabled={!inputText.trim()}
+                  className="w-7 h-7 rounded-full bg-[#1F1E1D] hover:bg-[#3D3A37] disabled:opacity-25 disabled:hover:bg-[#1F1E1D] text-[#FBF9F5] flex items-center justify-center transition-all shadow-xs cursor-pointer disabled:cursor-not-allowed active:scale-95"
+                  title="Send message (Enter)"
+                  aria-label="Send message"
+                >
+                  <Send className="w-3 h-3 ml-0.5" />
+                </button>
+              )}
+            </div>
+          </form>
+
+          {/* Minimal Status Caption */}
+          <div className="flex items-center justify-between px-3 pt-1 text-[10px] text-[#A39E96]">
+            <span className="truncate">
+              {selectedModel.name}
+              {selectedModel.costPerQueryCredits > 0 && ` · ${selectedModel.costPerQueryCredits} cr`}
+            </span>
+            <span className="hidden sm:inline">
+              Shift+Enter for newline
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
