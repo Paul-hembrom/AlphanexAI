@@ -2,6 +2,7 @@
 
 import React from 'react';
 import Image from 'next/image';
+import Link from 'next/link';
 import {
   Code2,
   BookOpen,
@@ -16,6 +17,7 @@ import {
   Sparkles,
   Mountain,
   Settings,
+  Home,
 } from 'lucide-react';
 import { WorkMode, ModelInfo, ReasoningEffort, UserWallet, ModelTier, UserProfileSettings } from '@/lib/types';
 import ModelSelector from './ModelSelector';
@@ -87,32 +89,39 @@ export default function Header({
             </button>
           )}
 
-          {/* Brand Logo & Name */}
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-[#1F1E1D] text-[#FBF9F5] flex items-center justify-center font-bold text-base shadow-xs relative">
-              <span className="font-mono text-amber-400 font-black">AI</span>
-              {/* Subtle Nepal flag emblem / Mountain peak accent */}
+          {/* Brand Logo & Name linking to Homepage */}
+          <Link
+            href="/"
+            className="flex items-center gap-2 group hover:opacity-90 transition-opacity"
+            title="Return to AlphanexAI Homepage"
+          >
+            <div className="w-8 h-8 rounded-lg bg-[#1F1E1D] text-[#FBF9F5] flex items-center justify-center font-bold text-base shadow-xs relative group-hover:scale-105 transition-transform">
+              <span className="font-mono text-amber-400 font-black tracking-tighter text-sm">AN</span>
               <div
                 className="absolute -top-1 -right-1 w-3 h-3 bg-red-600 rounded-full border border-white flex items-center justify-center text-[7px] text-white font-bold"
-                title="Nepal Regional AI Platform"
+                title="Alphanex Regional Hub"
               >
-                NP
+                AI
               </div>
             </div>
-            <div className="hidden lg:block">
+            <div className="hidden lg:block text-left">
               <div className="flex items-center gap-1.5">
                 <span className="font-semibold text-sm tracking-tight text-[#1F1E1D]">
-                  AI Festa Studio
+                  AlphanexAI
                 </span>
                 <span className="text-[10px] px-1.5 py-0.2 rounded font-medium bg-[#EFECE6] text-[#736E67] border border-[#E5E2DC]">
-                  v2.5
+                  Workspace
                 </span>
               </div>
-              <p className="text-[10px] text-[#858079] leading-none">
-                Nepal AI Workspace
+              <p className="text-[10px] text-[#858079] leading-none flex items-center gap-1">
+                <span>Frontier Studio</span>
+                <span className="text-[#B8B2A6]">&middot;</span>
+                <span className="text-blue-600 font-medium group-hover:underline flex items-center gap-0.5">
+                  <Home className="w-2.5 h-2.5" /> Home
+                </span>
               </p>
             </div>
-          </div>
+          </Link>
 
           {/* Mode Switcher Segmented Control */}
           <div

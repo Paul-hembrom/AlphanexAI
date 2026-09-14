@@ -2,17 +2,17 @@ import type {Metadata} from 'next';
 import './globals.css'; // Global styles
 
 export const metadata: Metadata = {
-  title: 'AI Festa Studio — Next-Gen AI Workspace for Developers & Researchers',
-  description: 'Premier AI workspace tailored for developers and researchers in Nepal, fusing Claude minimalist aesthetic, Google AI Studio parameter inspector and code diffs, and multi-mode workflows.',
+  title: 'AI Festa Studio — AlphanexAI Frontier Workspace & Research Platform',
+  description: 'AlphanexAI: Frontier AI workspace and intelligence platform for developers and researchers, featuring multi-model reasoning, interactive canvas diffs, parameter studio, and grounded workflows.',
   openGraph: {
-    title: 'AI Festa Studio — Next-Gen AI Workspace for Developers & Researchers',
-    description: 'Premier AI workspace tailored for developers and researchers in Nepal, fusing Claude minimalist aesthetic, Google AI Studio parameter inspector and code diffs, and multi-mode workflows.',
+    title: 'AI Festa Studio — AlphanexAI Frontier Workspace & Research Platform',
+    description: 'AlphanexAI: Frontier AI workspace and intelligence platform for developers and researchers, featuring multi-model reasoning, interactive canvas diffs, parameter studio, and grounded workflows.',
     type: 'website',
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'AI Festa Studio',
-    description: 'Premier AI workspace tailored for developers and researchers in Nepal.',
+    title: 'AI Festa Studio — AlphanexAI',
+    description: 'AlphanexAI: Frontier AI workspace and intelligence platform for developers and researchers.',
   },
 };
 
