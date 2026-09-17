@@ -67,6 +67,7 @@ export default function ModelSelector({
   const maxModels = AVAILABLE_MODELS.filter((m) => m.tier === 'max' || m.tier === 'vault');
 
   const [showSpecsModal, setShowSpecsModal] = useState(false);
+  const [isEffortsMenuOpen, setIsEffortsMenuOpen] = useState(false);
 
   // Check if user has active Pro subscription or Max subscription
   const hasProSubscription = userPlan === 'Pro Builder' || userPlan === 'Pro' || userPlan === 'Max';
@@ -279,36 +280,74 @@ export default function ModelSelector({
             </div>
           )}
 
-          {/* Quick Effort Tier Switcher for Researcher Mode */}
+          {/* Efforts Dropdown Menu for Researcher Mode */}
           {currentMode === 'researcher' && onChangeEffort && (
-            <div className="px-3 py-2 bg-[#FAF7F2] border-b border-[#E5E2DC]">
-              <div className="text-[10px] font-semibold text-[#858079] uppercase tracking-wider mb-1.5 flex items-center justify-between">
-                <span>Active Research Effort Tag</span>
-                <span className="font-mono text-emerald-700">{currentEffortMeta.tokens.toLocaleString()} max tokens</span>
-              </div>
-              <div className="grid grid-cols-5 gap-1">
-                {researchTierList.map(({ level, key }) => {
-                  const meta = RESEARCH_TIERS_META[key];
-                  const isSel = reasoningEffort === level;
-                  return (
-                    <button
-                      key={key}
-                      type="button"
-                      onClick={() => onChangeEffort(level)}
-                      className={`px-1.5 py-1 rounded text-center text-[10px] font-medium border transition-all cursor-pointer ${
-                        isSel
-                          ? 'bg-[#1F1E1D] text-white border-[#1F1E1D] shadow-2xs font-semibold'
-                          : 'bg-white hover:bg-[#F0ECE4] text-[#4D4943] border-[#E5E2DC]'
+            <div className="px-3 py-2 bg-[#FAF7F2] border-b border-[#E5E2DC] flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-semibold text-[#55504A]">Efforts:</span>
+                <div className="relative">
+                  <button
+                    id="model-selector-efforts-dropdown-btn"
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setIsEffortsMenuOpen(!isEffortsMenuOpen);
+                    }}
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-white hover:bg-[#F3EFEA] border border-[#D5D0C7] text-xs font-semibold text-[#1F1E1D] shadow-2xs cursor-pointer transition-all"
+                  >
+                    <span>{reasoningEffort}</span>
+                    <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-amber-50 text-amber-800 border border-amber-200">
+                      {currentEffortMeta.multiplier}
+                    </span>
+                    <ChevronDown
+                      className={`w-3 h-3 text-[#736E67] transition-transform ${
+                        isEffortsMenuOpen ? 'rotate-180' : ''
                       }`}
+                    />
+                  </button>
+
+                  {isEffortsMenuOpen && (
+                    <div
+                      id="model-selector-efforts-menu"
+                      className="absolute left-0 top-full mt-1 w-56 bg-[#FBF9F5] border border-[#E5E2DC] rounded-lg shadow-lg z-30 p-1 space-y-0.5 animate-in fade-in zoom-in-95 duration-100"
                     >
-                      <div className="truncate">{level}</div>
-                      <div className={`text-[9px] ${isSel ? 'text-amber-300' : 'text-[#858079]'}`}>
-                        {meta.multiplier}
-                      </div>
-                    </button>
-                  );
-                })}
+                      {researchTierList.map(({ level, key }) => {
+                        const meta = RESEARCH_TIERS_META[key];
+                        const isSel = reasoningEffort === level;
+                        return (
+                          <button
+                            key={key}
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onChangeEffort(level);
+                              setIsEffortsMenuOpen(false);
+                            }}
+                            className={`w-full text-left px-2 py-1.5 rounded text-xs flex items-center justify-between transition-colors cursor-pointer ${
+                              isSel
+                                ? 'bg-[#ECE8E1] text-[#1F1E1D] font-semibold'
+                                : 'hover:bg-[#F3EFEA] text-[#4D4943]'
+                            }`}
+                          >
+                            <div className="flex items-center gap-1.5">
+                              <span>{level}</span>
+                              <span className="text-[10px] text-[#736E67] font-mono">
+                                ({meta.multiplier})
+                              </span>
+                            </div>
+                            <span className="text-[9px] font-mono text-emerald-700">
+                              {meta.tokens.toLocaleString()} tok
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               </div>
+              <span className="text-[10px] font-mono text-emerald-700 hidden sm:inline">
+                {currentEffortMeta.tokens.toLocaleString()} max tokens
+              </span>
             </div>
           )}
 
@@ -337,7 +376,7 @@ export default function ModelSelector({
                       }`}
                     >
                       <button
-                        id={`model-option-${model.id}`}
+                        id={`model-option-${model.id.replace(/[^a-zA-Z0-9_-]/g, '-')}`}
                         type="button"
                         onClick={() => handleModelClick(model, reasoningEffort)}
                         className="w-full text-left px-2.5 py-2 cursor-pointer"
@@ -390,34 +429,6 @@ export default function ModelSelector({
                           )}
                         </div>
                       </button>
-
-                      {/* In Researcher Mode, render the 5 tier tags directly beneath */}
-                      {currentMode === 'researcher' && (
-                        <div className="px-2.5 pb-2 pt-1 border-t border-[#E5E2DC]/60 grid grid-cols-5 gap-1">
-                          {researchTierList.map(({ level, key }) => {
-                            const meta = RESEARCH_TIERS_META[key];
-                            const isTierSelected = isCurrent && reasoningEffort === level;
-                            return (
-                              <button
-                                key={key}
-                                type="button"
-                                onClick={() => handleModelClick(model, level)}
-                                title={`${model.name} - ${key}: ${meta.warningText} (${meta.credits} credits)`}
-                                className={`px-1 py-1 rounded text-center text-[10px] transition-all cursor-pointer border ${
-                                  isTierSelected
-                                    ? 'bg-emerald-700 text-white border-emerald-800 font-semibold shadow-2xs'
-                                    : 'bg-[#FAF7F2] hover:bg-emerald-50 text-[#3D3A37] border-[#E5E2DC]'
-                                }`}
-                              >
-                                <div className="font-medium truncate">-{key}</div>
-                                <div className={`text-[8px] font-mono leading-tight ${isTierSelected ? 'text-emerald-100' : 'text-[#858079]'}`}>
-                                  {meta.multiplier}
-                                </div>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      )}
                     </div>
                   );
                 })}
@@ -501,34 +512,6 @@ export default function ModelSelector({
                           )}
                         </div>
                       </button>
-
-                      {/* In Researcher Mode, render the 5 tier tags */}
-                      {currentMode === 'researcher' && (
-                        <div className="px-2.5 pb-2 pt-1 border-t border-[#E5E2DC]/60 grid grid-cols-5 gap-1">
-                          {researchTierList.map(({ level, key }) => {
-                            const meta = RESEARCH_TIERS_META[key];
-                            const isTierSelected = isCurrent && reasoningEffort === level;
-                            return (
-                              <button
-                                key={key}
-                                type="button"
-                                onClick={() => handleModelClick(model, level)}
-                                title={`${model.name} - ${key}: ${meta.warningText} (${meta.credits} credits)`}
-                                className={`px-1 py-1 rounded text-center text-[10px] transition-all cursor-pointer border ${
-                                  isTierSelected
-                                    ? 'bg-teal-700 text-white border-teal-800 font-semibold shadow-2xs'
-                                    : 'bg-[#FAF7F2] hover:bg-teal-50 text-[#3D3A37] border-[#E5E2DC]'
-                                }`}
-                              >
-                                <div className="font-medium truncate">-{key}</div>
-                                <div className={`text-[8px] font-mono leading-tight ${isTierSelected ? 'text-teal-100' : 'text-[#858079]'}`}>
-                                  {meta.multiplier}
-                                </div>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      )}
                     </div>
                   );
                 })}
@@ -612,34 +595,6 @@ export default function ModelSelector({
                           )}
                         </div>
                       </button>
-
-                      {/* In Researcher Mode, render the 5 tier tags */}
-                      {currentMode === 'researcher' && (
-                        <div className="px-2.5 pb-2 pt-1 border-t border-[#BFDBFE]/60 grid grid-cols-5 gap-1">
-                          {researchTierList.map(({ level, key }) => {
-                            const meta = RESEARCH_TIERS_META[key];
-                            const isTierSelected = isCurrent && reasoningEffort === level;
-                            return (
-                              <button
-                                key={key}
-                                type="button"
-                                onClick={() => handleModelClick(model, level)}
-                                title={`${model.name} - ${key}: ${meta.warningText} (${meta.credits} credits)`}
-                                className={`px-1 py-1 rounded text-center text-[10px] transition-all cursor-pointer border ${
-                                  isTierSelected
-                                    ? 'bg-[#0A66C2] text-white border-[#0A66C2] font-semibold shadow-2xs'
-                                    : 'bg-[#FAF7F2] hover:bg-blue-50 text-[#3D3A37] border-[#E5E2DC]'
-                                }`}
-                              >
-                                <div className="font-medium truncate">-{key}</div>
-                                <div className={`text-[8px] font-mono leading-tight ${isTierSelected ? 'text-blue-100' : 'text-[#858079]'}`}>
-                                  {meta.multiplier}
-                                </div>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      )}
                     </div>
                   );
                 })}
@@ -724,34 +679,6 @@ export default function ModelSelector({
                           </div>
                         </div>
                       </button>
-
-                      {/* In Researcher Mode, render the 5 tier tags */}
-                      {currentMode === 'researcher' && (
-                        <div className="px-2.5 pb-2 pt-1 border-t border-[#E9D5FF] grid grid-cols-5 gap-1">
-                          {researchTierList.map(({ level, key }) => {
-                            const meta = RESEARCH_TIERS_META[key];
-                            const isTierSelected = isCurrent && reasoningEffort === level;
-                            return (
-                              <button
-                                key={key}
-                                type="button"
-                                onClick={() => handleModelClick(model, level)}
-                                title={`${model.name} - ${key}: ${meta.warningText} (${meta.credits} credits)`}
-                                className={`px-1 py-1 rounded text-center text-[10px] transition-all cursor-pointer border ${
-                                  isTierSelected
-                                    ? 'bg-purple-700 text-white border-purple-700 font-semibold shadow-2xs'
-                                    : 'bg-[#FAF7F2] hover:bg-purple-50 text-[#3D3A37] border-[#E5E2DC]'
-                                }`}
-                              >
-                                <div className="font-medium truncate">-{key}</div>
-                                <div className={`text-[8px] font-mono leading-tight ${isTierSelected ? 'text-purple-100' : 'text-[#858079]'}`}>
-                                  {meta.multiplier}
-                                </div>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      )}
                     </div>
                   );
                 })}
@@ -878,34 +805,6 @@ export default function ModelSelector({
                           </div>
                         </div>
                       </button>
-
-                      {/* In Researcher Mode, render the 5 tier tags */}
-                      {currentMode === 'researcher' && (
-                        <div className="px-2.5 pb-2 pt-1 border-t border-[#FDBA74]/60 grid grid-cols-5 gap-1">
-                          {researchTierList.map(({ level, key }) => {
-                            const meta = RESEARCH_TIERS_META[key];
-                            const isTierSelected = isCurrent && reasoningEffort === level;
-                            return (
-                              <button
-                                key={key}
-                                type="button"
-                                onClick={() => handleModelClick(model, level)}
-                                title={`${model.name} - ${key}: ${meta.warningText} (${meta.credits} credits)`}
-                                className={`px-1 py-1 rounded text-center text-[10px] transition-all cursor-pointer border ${
-                                  isTierSelected
-                                    ? 'bg-[#B45309] text-white border-[#B45309] font-semibold shadow-2xs'
-                                    : 'bg-[#FAF7F2] hover:bg-amber-50 text-[#3D3A37] border-[#E5E2DC]'
-                                }`}
-                              >
-                                <div className="font-medium truncate">-{key}</div>
-                                <div className={`text-[8px] font-mono leading-tight ${isTierSelected ? 'text-amber-100' : 'text-[#858079]'}`}>
-                                  {meta.multiplier}
-                                </div>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      )}
                     </div>
                   );
                 })}

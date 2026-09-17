@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { GoogleGenAI } from '@google/genai';
 import { Citation, DiffData, WorkMode } from '@/lib/types';
+import { getOpenRouterApiKey, streamOpenRouter } from '@/lib/openrouter';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -32,6 +33,31 @@ export async function POST(
       };
 
       try {
+        // Priority 1: OpenRouter Unified LLM Router with backend token capping
+        const openRouterKey = getOpenRouterApiKey();
+        if (openRouterKey) {
+          try {
+            await streamOpenRouter({
+              apiKey: openRouterKey,
+              modelId,
+              prompt,
+              mode,
+              reasoningEffort,
+              history,
+              params,
+              sendEvent,
+              signal: req.signal,
+            });
+            controller.close();
+            return;
+          } catch (openRouterErr: any) {
+            console.warn(
+              'OpenRouter streaming encountered an issue, checking fallback providers:',
+              openRouterErr?.message || openRouterErr
+            );
+          }
+        }
+
         const apiKey = process.env.GEMINI_API_KEY;
 
         // If apiKey is available and not a placeholder, try real @google/genai streaming

@@ -745,7 +745,7 @@ export default function HomePage() {
               }`}
             >
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-              <span>Free Tier (2)</span>
+              <span>Free Tier ({AVAILABLE_MODELS.filter((m) => m.tier === 'free').length})</span>
             </button>
             <button
               type="button"
@@ -757,7 +757,7 @@ export default function HomePage() {
               }`}
             >
               <span className="w-1.5 h-1.5 rounded-full bg-teal-400" />
-              <span>Lite Tier (2)</span>
+              <span>Lite Tier ({AVAILABLE_MODELS.filter((m) => m.tier === 'lite').length})</span>
             </button>
             <button
               type="button"
@@ -769,7 +769,7 @@ export default function HomePage() {
               }`}
             >
               <span className="w-1.5 h-1.5 rounded-full bg-blue-400" />
-              <span>Plus Tier (4)</span>
+              <span>Plus Tier ({AVAILABLE_MODELS.filter((m) => m.tier === 'plus').length})</span>
             </button>
             <button
               type="button"
@@ -781,7 +781,7 @@ export default function HomePage() {
               }`}
             >
               <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
-              <span>Pro / Max Tier (3)</span>
+              <span>Pro / Max Tier ({AVAILABLE_MODELS.filter((m) => m.tier === 'pro' || m.tier === 'max' || m.tier === 'vault').length})</span>
             </button>
           </div>
 
@@ -866,7 +866,7 @@ export default function HomePage() {
                   {/* Launch CTA */}
                   <div className="pt-3 border-t border-[#EFECE6]">
                     <Link
-                      href={`/workspace?model=${model.id}`}
+                      href={`/workspace?model=${encodeURIComponent(model.id)}`}
                       className="w-full inline-flex items-center justify-between px-3 py-2 rounded-xl bg-[#F7F5F0] hover:bg-[#1F1E1D] text-[#1F1E1D] hover:text-white text-xs font-semibold transition-all group-hover:bg-[#1F1E1D] group-hover:text-white"
                     >
                       <span>Try in Workspace</span>

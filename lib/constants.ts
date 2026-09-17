@@ -2,7 +2,7 @@ import { ModelInfo, WorkMode, WorkspaceParams, DiffData } from './types';
 
 export const AVAILABLE_MODELS: ModelInfo[] = [
   // ==========================================
-  // TIER: FREE (2 Models)
+  // TIER: FREE (3 Models)
   // ==========================================
   {
     id: 'qwen-3-8-flash',
@@ -31,6 +31,20 @@ export const AVAILABLE_MODELS: ModelInfo[] = [
     outputPrice: '$0.14',
     differentiators: 'Low-latency asymmetric architecture; high-throughput pipelines; great for basic automation loops.',
     description: 'Low-latency asymmetric architecture; high-throughput pipelines; great for basic automation loops.',
+  },
+  {
+    id: 'inclusionai/ling-3.0-flash-vl:free',
+    name: 'InclusionAI Ling 3.0 Flash VL',
+    tier: 'free',
+    provider: 'Inclusion AI',
+    contextWindow: '128k tokens',
+    supportsThinking: false,
+    costPerQueryCredits: 0,
+    badge: 'Vision-Language Free',
+    inputPrice: '$0.00',
+    outputPrice: '$0.00',
+    differentiators: 'Native multimodal vision-language (VL) model; fast visual document parsing, UI & chart recognition, and zero-cost reasoning.',
+    description: 'Native multimodal vision-language (VL) model; fast visual document parsing, UI & chart recognition, and zero-cost reasoning.',
   },
 
   // ==========================================
