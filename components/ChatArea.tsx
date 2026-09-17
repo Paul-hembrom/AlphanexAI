@@ -27,7 +27,7 @@ import {
   WorkMode,
   ModelInfo,
 } from '@/lib/types';
-import { SAMPLE_PROMPTS_BY_MODE } from '@/lib/constants';
+import { SAMPLE_PROMPTS_BY_MODE, AVAILABLE_MODELS } from '@/lib/constants';
 
 interface ChatAreaProps {
   messages: ChatMessage[];
@@ -310,41 +310,59 @@ export default function ChatArea({
                 {isAssistant && (
                   <div className="w-full space-y-3">
                     {/* Header meta badge */}
-                    <div className="flex items-center justify-between text-xs text-[#858079] pt-1">
-                      <div className="flex items-center gap-1.5">
-                        <span className="font-semibold text-[#1F1E1D]">{selectedModel.name}</span>
-                        <span>&middot;</span>
-                        <span className="capitalize">{message.mode} Mode</span>
-                        {message.reasoningEffort && (
-                          <>
+                    {(() => {
+                      const msgModel =
+                        AVAILABLE_MODELS.find((m) => m.id === message.modelId) || selectedModel;
+                      return (
+                        <div className="flex items-center justify-between text-xs text-[#858079] pt-1">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="font-semibold text-[#1F1E1D]">{msgModel.name}</span>
                             <span>&middot;</span>
-                            <span className="text-amber-800 font-medium">
-                              {message.reasoningEffort} Reasoning
-                            </span>
-                          </>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => handleCopy(message.content, message.id)}
-                          className="hover:text-[#1F1E1D] flex items-center gap-1 text-[11px]"
-                          title="Copy response"
-                        >
-                          {copiedId === message.id ? (
-                            <>
-                              <Check className="w-3 h-3 text-emerald-600" />
-                              <span className="text-emerald-600">Copied</span>
-                            </>
-                          ) : (
-                            <>
-                              <Copy className="w-3 h-3" />
-                              <span>Copy</span>
-                            </>
-                          )}
-                        </button>
-                      </div>
-                    </div>
+                            <span className="capitalize">{message.mode} Mode</span>
+                            {message.routedModel && (
+                              <>
+                                <span>&middot;</span>
+                                <span
+                                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-[#EFECE6] text-[#55504A] font-mono text-[10px] border border-[#E0DCD5]"
+                                  title={`Backend routed to ${message.providerName || 'OpenRouter'}: ${message.routedModel}`}
+                                >
+                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                                  {message.routedModel}
+                                </span>
+                              </>
+                            )}
+                            {message.reasoningEffort && (
+                              <>
+                                <span>&middot;</span>
+                                <span className="text-amber-800 font-medium">
+                                  {message.reasoningEffort} Reasoning
+                                </span>
+                              </>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => handleCopy(message.content, message.id)}
+                              className="hover:text-[#1F1E1D] flex items-center gap-1 text-[11px]"
+                              title="Copy response"
+                            >
+                              {copiedId === message.id ? (
+                                <>
+                                  <Check className="w-3 h-3 text-emerald-600" />
+                                  <span className="text-emerald-600">Copied</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Copy className="w-3 h-3" />
+                                  <span>Copy</span>
+                                </>
+                              )}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })()}
 
                     {/* Thinking / Reasoning Accordion (MoE & Hybrid Thinking style) */}
                     {(message.thinkingContent || message.isThinking) && (

@@ -36,10 +36,10 @@ export const MODEL_TO_OPENROUTER_MAP: Record<string, string> = {
   'deepseek-v4-1-flash': 'deepseek/deepseek-r1-distill-qwen-32b',
 
   // Plus tier
-  'gemini-3-8-flash': 'google/gemini-2.0-flash-001',
+  'gemini-3-8-flash': 'google/gemini-2.5-flash',
   'deepseek-v4-pro': 'deepseek/deepseek-r1',
   'gpt-5-6-sol': 'openai/gpt-4o-mini',
-  'kimi-k3': 'moonshotai/moonshot-v1-32k',
+  'kimi-k3': 'moonshotai/kimi-k3',
 
   // Pro tier
   'claude-opus-5': 'anthropic/claude-3-opus',
@@ -50,6 +50,16 @@ export const MODEL_TO_OPENROUTER_MAP: Record<string, string> = {
   // Max tier
   'claude-fable-5-1': 'anthropic/claude-3.7-sonnet',
   'gpt-6-astra': 'openai/o1',
+
+  // Common direct aliases & fallback slugs
+  'deepseek-chat': 'deepseek/deepseek-chat',
+  'deepseek-r1': 'deepseek/deepseek-r1',
+  'claude-3-5-sonnet': 'anthropic/claude-3.5-sonnet',
+  'claude-3-7-sonnet': 'anthropic/claude-3.7-sonnet',
+  'gpt-4o': 'openai/gpt-4o',
+  'gpt-4o-mini': 'openai/gpt-4o-mini',
+  'gemini-2.5-flash': 'google/gemini-2.5-flash',
+  'gemini-2.0-flash': 'google/gemini-2.0-flash-001',
 };
 
 /**
@@ -223,6 +233,16 @@ export async function streamOpenRouter(options: StreamOpenRouterOptions): Promis
   // Enforce context window cap
   const cappedMessages = pruneMessagesForContext(rawMessages, tokenCap.maxContextTokens);
 
+  // Send model routing confirmation event so UI can display verified backend target
+  sendEvent({
+    type: 'routing',
+    modelId,
+    targetModel,
+    provider: 'OpenRouter',
+    reasoningEffort,
+    tokenCap: backendCappedTokens,
+  });
+
   // Send thinking initiation event
   sendEvent({
     type: 'thinking',
@@ -379,6 +399,9 @@ export async function streamOpenRouter(options: StreamOpenRouterOptions): Promis
 
   sendEvent({
     type: 'done',
+    modelId,
+    routedModel: targetModel,
+    provider: 'OpenRouter',
     tokens: {
       promptTokens: promptTokensEst,
       completionTokens: completionTokensEst,

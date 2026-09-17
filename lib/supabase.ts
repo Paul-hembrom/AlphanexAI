@@ -352,6 +352,21 @@ export function updateStoredThreadMode(id: string, mode: WorkMode): ChatThread[]
   return updated;
 }
 
+export function updateStoredThreadModel(id: string, modelId: string): ChatThread[] {
+  const current = getStoredThreads();
+  const updated = current.map((t) =>
+    t.id === id
+      ? {
+          ...t,
+          modelId,
+          updatedAt: Date.now(),
+        }
+      : t
+  );
+  saveStoredThreads(updated);
+  return updated;
+}
+
 export function clearAllStoredThreads(): ChatThread[] {
   if (typeof window !== 'undefined') {
     try {

@@ -40,6 +40,7 @@ import {
   createStoredThread,
   updateStoredThreadMessages,
   updateStoredThreadMode,
+  updateStoredThreadModel,
   clearAllStoredThreads,
   getStoredProfile,
   saveStoredProfile,
@@ -289,6 +290,9 @@ export default function WorkspaceView() {
   // Model Select Handler
   const handleSelectModel = (model: ModelInfo) => {
     setSelectedModel(model);
+    if (activeThreadIdRef.current) {
+      updateStoredThreadModel(activeThreadIdRef.current, model.id);
+    }
   };
 
   // Open Payment Modal with specific intended tier if locked
@@ -569,6 +573,18 @@ export default function WorkspaceView() {
                 );
                 // Also update Canvas
                 setActiveDiffData(data.diff);
+              } else if (data.type === 'routing') {
+                setMessages((prev) =>
+                  prev.map((msg) =>
+                    msg.id === assistantMsgId
+                      ? {
+                          ...msg,
+                          routedModel: (data.targetModel as string) || msg.routedModel,
+                          providerName: (data.provider as string) || msg.providerName,
+                        }
+                      : msg
+                  )
+                );
               } else if (data.type === 'error') {
                 setMessages((prev) =>
                   prev.map((msg) =>
@@ -589,6 +605,18 @@ export default function WorkspaceView() {
                 );
               } else if (data.type === 'done') {
                 setIsStreaming(false);
+                setMessages((prev) =>
+                  prev.map((msg) =>
+                    msg.id === assistantMsgId
+                      ? {
+                          ...msg,
+                          routedModel: (data.routedModel as string) || msg.routedModel,
+                          providerName: (data.provider as string) || msg.providerName,
+                          tokensUsed: data.tokens,
+                        }
+                      : msg
+                  )
+                );
                 // Deduct credits if applicable
                 if (selectedModel.costPerQueryCredits > 0) {
                   setWallet((prev) => ({

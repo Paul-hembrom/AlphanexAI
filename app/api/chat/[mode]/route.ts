@@ -93,6 +93,15 @@ export async function POST(
               config.tools = [{ googleSearch: {} }];
             }
 
+            // Send routing confirmation
+            sendEvent({
+              type: 'routing',
+              modelId,
+              targetModel: 'gemini-2.5-flash',
+              provider: 'Google GenAI',
+              reasoningEffort,
+            });
+
             // If reasoning effort is set for thinking-capable models, we can signal thinking
             if (reasoningEffort) {
               sendEvent({
@@ -102,9 +111,9 @@ export async function POST(
               await new Promise((r) => setTimeout(r, 300));
             }
 
-            // Call generateContentStream
+            // Call generateContentStream with supported gemini-2.5-flash model
             const responseStream = await ai.models.generateContentStream({
-              model: 'gemini-3.8-flash',
+              model: 'gemini-2.5-flash',
               contents: prompt,
               config: config as any,
             });
@@ -149,6 +158,9 @@ export async function POST(
 
             sendEvent({
               type: 'done',
+              modelId,
+              routedModel: 'gemini-2.5-flash',
+              provider: 'Google GenAI',
               tokens: {
                 promptTokens: Math.round(prompt.length / 4),
                 completionTokens: Math.round(accumulatedText.length / 4),
@@ -222,6 +234,15 @@ async function simulateStreamingResponse(
   reasoningEffort: string,
   sendEvent: (data: Record<string, unknown>) => void
 ) {
+  // Send routing confirmation
+  sendEvent({
+    type: 'routing',
+    modelId,
+    targetModel: `local-engine (${modelId})`,
+    provider: 'Local Resilient Engine',
+    reasoningEffort,
+  });
+
   // Thinking phase
   const thinkingNotes = [
     `Analyzing user query within ${mode.toUpperCase()} framework on ${modelId}...`,
@@ -491,6 +512,9 @@ Feel free to switch modes at the top bar to **Developer Mode** for live code dif
   // Send done
   sendEvent({
     type: 'done',
+    modelId,
+    routedModel: modelId,
+    provider: 'Local Resilient Engine',
     tokens: {
       promptTokens: Math.round(prompt.length / 4),
       completionTokens: Math.round(fullResponse.length / 4),

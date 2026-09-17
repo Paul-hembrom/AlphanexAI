@@ -125,6 +125,8 @@ export interface ChatMessage {
   timestamp: number;
   mode: WorkMode;
   modelId: string;
+  routedModel?: string;
+  providerName?: string;
   citations?: Citation[];
   diffData?: DiffData;
   isThinking?: boolean;
