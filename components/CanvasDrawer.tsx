@@ -36,13 +36,27 @@ import {
   Database,
   RefreshCw,
   CheckCircle2,
+  Monitor,
+  Tablet,
+  Smartphone,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { DiffData, WorkMode, Citation } from '@/lib/types';
 import { INITIAL_DIFF_SAMPLE, SAMPLE_PYTHON_SCRIPT } from '@/lib/constants';
+import {
+  getWebAppData,
+  saveWebAppData,
+  getPreviewUrl,
+  slugifyAppName,
+  extractCodeFromMarkdown,
+  DEFAULT_STARTER_WEBAPP_HTML,
+  DEFAULT_WEBAPP_NAME,
+  ACTIVE_APP_NAME_KEY,
+} from '@/lib/webapp-preview';
 
 export type CanvasTab =
   | 'diff'
+  | 'preview'
   | 'terminal'
   | 'github'
   | 'connectors'
@@ -113,7 +127,7 @@ export default function CanvasDrawer({
   isDragging = false,
 }: CanvasDrawerProps) {
   const [activeTab, setActiveTab] = useState<CanvasTab>(() => {
-    if (currentMode === 'developer') return 'diff';
+    if (currentMode === 'developer') return 'preview';
     if (currentMode === 'researcher') return 'sources';
     return 'document';
   });
@@ -122,7 +136,9 @@ export default function CanvasDrawer({
   useEffect(() => {
     if (currentMode === 'developer') {
       setActiveTab((prev) =>
-        prev === 'diff' || prev === 'terminal' || prev === 'github' ? prev : 'diff'
+        prev === 'preview' || prev === 'diff' || prev === 'terminal' || prev === 'github' || prev === 'connectors'
+          ? prev
+          : 'preview'
       );
     } else if (currentMode === 'researcher') {
       setActiveTab((prev) => (prev === 'sources' || prev === 'brief' ? prev : 'sources'));
@@ -263,6 +279,113 @@ export default function CanvasDrawer({
   );
   const [copiedDoc, setCopiedDoc] = useState(false);
   const [copiedScratchpad, setCopiedScratchpad] = useState(false);
+
+  // Web App Preview State (Developer Mode)
+  const [webAppName, setWebAppName] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem(ACTIVE_APP_NAME_KEY) || DEFAULT_WEBAPP_NAME;
+    }
+    return DEFAULT_WEBAPP_NAME;
+  });
+  const [isEditingAppName, setIsEditingAppName] = useState(false);
+  const [appNameDraft, setAppNameDraft] = useState(webAppName);
+  const [webAppHtml, setWebAppHtml] = useState<string>(() => {
+    const initialName =
+      typeof window !== 'undefined'
+        ? localStorage.getItem(ACTIVE_APP_NAME_KEY) || DEFAULT_WEBAPP_NAME
+        : DEFAULT_WEBAPP_NAME;
+    return getWebAppData(initialName).html;
+  });
+  const [previewViewport, setPreviewViewport] = useState<'desktop' | 'tablet' | 'mobile'>('desktop');
+  const [previewIframeKey, setPreviewIframeKey] = useState(0);
+  const [copiedPreviewUrl, setCopiedPreviewUrl] = useState(false);
+  const [showWebDomainModal, setShowWebDomainModal] = useState(false);
+  const [webCustomDomain, setWebCustomDomain] = useState('');
+  const [webDomainSaved, setWebDomainSaved] = useState(false);
+  const [showWebSourceEditor, setShowWebSourceEditor] = useState(false);
+  const [editableWebHtml, setEditableWebHtml] = useState<string>(() => {
+    const initialName =
+      typeof window !== 'undefined'
+        ? localStorage.getItem(ACTIVE_APP_NAME_KEY) || DEFAULT_WEBAPP_NAME
+        : DEFAULT_WEBAPP_NAME;
+    return getWebAppData(initialName).html;
+  });
+  const [isEditingWebCode, setIsEditingWebCode] = useState(false);
+
+  // Listen to external storage/custom updates
+  useEffect(() => {
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === `alphanex_webapp_code_${slugifyAppName(webAppName)}` && e.newValue) {
+        setWebAppHtml(e.newValue);
+        setEditableWebHtml(e.newValue);
+        setPreviewIframeKey((k) => k + 1);
+      }
+    };
+    const handleCustom = (e: Event) => {
+      const ce = e as CustomEvent;
+      if (ce.detail?.appName === slugifyAppName(webAppName) && ce.detail?.html) {
+        setWebAppHtml(ce.detail.html);
+        setEditableWebHtml(ce.detail.html);
+        setPreviewIframeKey((k) => k + 1);
+      }
+    };
+    window.addEventListener('storage', handleStorage);
+    window.addEventListener('alphanex-webapp-updated', handleCustom);
+    return () => {
+      window.removeEventListener('storage', handleStorage);
+      window.removeEventListener('alphanex-webapp-updated', handleCustom);
+    };
+  }, [webAppName]);
+
+  // Auto-detect code when assistant responds in developer mode
+  useEffect(() => {
+    if (currentMode === 'developer' && latestAssistantMessage) {
+      const extracted = extractCodeFromMarkdown(latestAssistantMessage);
+      if (extracted && extracted.length > 40) {
+        saveWebAppData(webAppName, extracted);
+        setWebAppHtml(extracted);
+        setEditableWebHtml(extracted);
+        setPreviewIframeKey((k) => k + 1);
+      }
+    }
+  }, [latestAssistantMessage, currentMode, webAppName]);
+
+  const cleanAppSlug = slugifyAppName(webAppName);
+  const previewOrigin =
+    typeof window !== 'undefined' && window.location.origin
+      ? window.location.origin
+      : 'https://alphanexai.vercel.app';
+  const activePreviewUrl = `${previewOrigin}/workspace/${cleanAppSlug}/preview`;
+
+  const handleSaveAppName = () => {
+    const clean = slugifyAppName(appNameDraft);
+    setWebAppName(clean);
+    saveWebAppData(clean, webAppHtml || DEFAULT_STARTER_WEBAPP_HTML);
+    setIsEditingAppName(false);
+  };
+
+  const handleCopyPreviewUrl = () => {
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      navigator.clipboard.writeText(activePreviewUrl);
+      setCopiedPreviewUrl(true);
+      setTimeout(() => setCopiedPreviewUrl(false), 2000);
+    }
+  };
+
+  const handleSaveCustomWebCode = () => {
+    saveWebAppData(webAppName, editableWebHtml);
+    setWebAppHtml(editableWebHtml);
+    setPreviewIframeKey((k) => k + 1);
+    setIsEditingWebCode(false);
+  };
+
+  const handleResetWebStarter = () => {
+    saveWebAppData(webAppName, DEFAULT_STARTER_WEBAPP_HTML);
+    setWebAppHtml(DEFAULT_STARTER_WEBAPP_HTML);
+    setEditableWebHtml(DEFAULT_STARTER_WEBAPP_HTML);
+    setPreviewIframeKey((k) => k + 1);
+    setIsEditingWebCode(false);
+  };
 
   // When custom code snippet is passed, update terminal code
   useEffect(() => {
@@ -538,6 +661,23 @@ captured
               aria-label="Developer Tools"
             >
               <button
+                id="canvas-tab-preview"
+                type="button"
+                role="tab"
+                aria-selected={activeTab === 'preview'}
+                onClick={() => setActiveTab('preview')}
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs transition-all cursor-pointer ${
+                  activeTab === 'preview'
+                    ? 'bg-[#FBF9F5] text-[#1F1E1D] font-bold shadow-xs'
+                    : 'text-[#736E67] hover:text-[#1F1E1D]'
+                }`}
+              >
+                <Globe className="w-3.5 h-3.5 text-indigo-600" />
+                <span>Web Preview</span>
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              </button>
+
+              <button
                 id="canvas-tab-diff"
                 type="button"
                 role="tab"
@@ -707,7 +847,22 @@ captured
         </div>
 
         {/* Right Controls: Full Width, Width Toggle & Collapse/Close */}
-        <div className="flex items-center gap-1 shrink-0 ml-2">
+        <div className="flex items-center gap-1.5 shrink-0 ml-2">
+          {/* Direct New Tab Preview Link in Developer Mode */}
+          {currentMode === 'developer' && (
+            <a
+              id="canvas-topbar-preview-newtab-link"
+              href={activePreviewUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 transition-colors shadow-2xs"
+              title={`Open Live WebApp (${activePreviewUrl}) in New Tab`}
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Open in New Tab</span>
+            </a>
+          )}
+
           {/* Full Width Toggle Button */}
           {onToggleFullWidth && (
             <button
@@ -779,6 +934,391 @@ captured
           </button>
         </div>
       </div>
+
+      {/* Developer Mode Tab: Interactive Web App Preview with New Tab Link & Domain Config */}
+      {currentMode === 'developer' && activeTab === 'preview' && (
+        <div id="webapp-preview-canvas-content" className="flex-1 flex flex-col overflow-hidden bg-[#FAF8F5]">
+          {/* Top Browser-Style Address Bar & Controls */}
+          <div className="px-3.5 py-2.5 bg-[#FAF8F3] border-b border-[#E5E2DC] flex flex-wrap items-center justify-between gap-2 text-xs">
+            {/* Left: App Name Editor & URL Slug */}
+            <div className="flex items-center gap-2 flex-1 min-w-[200px]">
+              <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" title="Web App Runtime Live" />
+              
+              {isEditingAppName ? (
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="text"
+                    value={appNameDraft}
+                    onChange={(e) => setAppNameDraft(e.target.value)}
+                    placeholder="your-app-name"
+                    className="px-2 py-1 text-xs font-mono rounded-md border border-indigo-400 bg-white text-[#1F1E1D] focus:outline-hidden"
+                    autoFocus
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleSaveAppName();
+                      if (e.key === 'Escape') setIsEditingAppName(false);
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={handleSaveAppName}
+                    className="px-2 py-1 rounded bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold"
+                  >
+                    Save
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsEditingAppName(false)}
+                    className="px-1.5 py-1 text-[11px] text-[#736E67] hover:text-[#1F1E1D]"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-1.5 truncate">
+                  <span className="font-mono text-xs text-[#736E67] hidden md:inline truncate">
+                    /workspace/
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAppNameDraft(webAppName);
+                      setIsEditingAppName(true);
+                    }}
+                    className="font-mono font-bold text-xs text-indigo-700 hover:underline px-1 py-0.5 rounded hover:bg-indigo-50 transition cursor-pointer"
+                    title="Click to rename your web app slug"
+                  >
+                    {cleanAppSlug}
+                  </button>
+                  <span className="font-mono text-xs text-[#736E67] hidden md:inline">
+                    /preview
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAppNameDraft(webAppName);
+                      setIsEditingAppName(true);
+                    }}
+                    className="text-[10px] text-[#9E988F] hover:text-[#1F1E1D] p-0.5"
+                    title="Edit app name"
+                  >
+                    <Edit3 className="w-3 h-3" />
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Right: Viewport Controls, Code Inspector, Domain Config & New Tab Action */}
+            <div className="flex items-center gap-1.5 shrink-0">
+              {/* Viewport switcher */}
+              <div className="hidden sm:flex items-center bg-[#EAE6DF] p-0.5 rounded-lg border border-[#D5D0C7]">
+                <button
+                  type="button"
+                  onClick={() => setPreviewViewport('desktop')}
+                  className={`p-1 rounded-md text-xs transition-all ${
+                    previewViewport === 'desktop' ? 'bg-white text-[#1F1E1D] font-bold shadow-2xs' : 'text-[#736E67]'
+                  }`}
+                  title="Desktop View"
+                >
+                  <Monitor className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPreviewViewport('tablet')}
+                  className={`p-1 rounded-md text-xs transition-all ${
+                    previewViewport === 'tablet' ? 'bg-white text-[#1F1E1D] font-bold shadow-2xs' : 'text-[#736E67]'
+                  }`}
+                  title="Tablet View (768px)"
+                >
+                  <Tablet className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPreviewViewport('mobile')}
+                  className={`p-1 rounded-md text-xs transition-all ${
+                    previewViewport === 'mobile' ? 'bg-white text-[#1F1E1D] font-bold shadow-2xs' : 'text-[#736E67]'
+                  }`}
+                  title="Mobile View (375px)"
+                >
+                  <Smartphone className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              {/* Refresh Sandbox */}
+              <button
+                type="button"
+                onClick={() => setPreviewIframeKey((k) => k + 1)}
+                className="p-1.5 rounded-md hover:bg-[#EFECE6] text-[#736E67] hover:text-[#1F1E1D] transition-colors"
+                title="Reload Preview Sandbox"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+              </button>
+
+              {/* Toggle HTML Code Inspector */}
+              <button
+                type="button"
+                onClick={() => setShowWebSourceEditor(!showWebSourceEditor)}
+                className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium border transition-colors cursor-pointer ${
+                  showWebSourceEditor
+                    ? 'bg-[#1F1E1D] text-white border-[#1F1E1D]'
+                    : 'bg-white text-[#55504A] border-[#D5D0C7] hover:bg-[#FAF8F5]'
+                }`}
+                title="Inspect or Edit HTML Source"
+              >
+                <Code2 className="w-3.5 h-3.5" />
+                <span className="hidden xl:inline">Code</span>
+              </button>
+
+              {/* Domain Config Option Trigger */}
+              <button
+                type="button"
+                onClick={() => setShowWebDomainModal(true)}
+                className="flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium bg-white text-[#55504A] border border-[#D5D0C7] hover:bg-[#FAF8F5] transition-colors cursor-pointer"
+                title="Custom Domain Hosting & Android App Packaging"
+              >
+                <Globe className="w-3.5 h-3.5 text-indigo-600" />
+                <span className="hidden xl:inline">Domain</span>
+              </button>
+
+              {/* Copy URL Link */}
+              <button
+                type="button"
+                onClick={handleCopyPreviewUrl}
+                className="p-1.5 rounded-md hover:bg-[#EFECE6] text-[#736E67] hover:text-[#1F1E1D] transition-colors cursor-pointer"
+                title="Copy Preview URL"
+              >
+                {copiedPreviewUrl ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+              </button>
+
+              {/* Primary CTA: Open in New Tab */}
+              <a
+                id="webapp-canvas-open-newtab-btn"
+                href={activePreviewUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-[#1F1E1D] hover:bg-[#38342E] text-white transition-all shadow-xs shrink-0 cursor-pointer"
+                title={`Open built website in dedicated new tab: ${activePreviewUrl}`}
+              >
+                <ExternalLink className="w-3.5 h-3.5 text-amber-400" />
+                <span>Open in New Tab</span>
+              </a>
+            </div>
+          </div>
+
+          {/* Quick Domain & Mobile Packaging Roadmap Notice */}
+          <div className="px-3.5 py-1.5 bg-gradient-to-r from-indigo-50/70 to-purple-50/50 border-b border-indigo-100 flex items-center justify-between text-[11px] text-indigo-950">
+            <div className="flex items-center gap-1.5 truncate">
+              <Sparkles className="w-3 h-3 text-indigo-600 shrink-0" />
+              <span className="truncate">
+                Live URL: <strong className="font-mono">{activePreviewUrl}</strong>
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowWebDomainModal(true)}
+              className="text-indigo-700 hover:text-indigo-900 font-semibold underline shrink-0 cursor-pointer ml-2"
+            >
+              Domain & Hosting Config
+            </button>
+          </div>
+
+          {/* Canvas Display & Code Inspector Split View */}
+          <div className="flex-1 flex overflow-hidden relative">
+            {/* Interactive Sandbox Screen */}
+            <div className="flex-1 flex items-center justify-center p-3 overflow-auto bg-[#EFEBE4]/60">
+              <div
+                className={`transition-all duration-200 overflow-hidden bg-white ${
+                  previewViewport === 'mobile'
+                    ? 'w-[375px] h-[667px] rounded-2xl shadow-2xl border-4 border-[#1F1E1D]'
+                    : previewViewport === 'tablet'
+                    ? 'w-[768px] h-[780px] rounded-xl shadow-2xl border-2 border-[#D5D0C7]'
+                    : 'w-full h-full rounded-md shadow-xs border border-[#E0DCD5]'
+                }`}
+              >
+                <iframe
+                  key={previewIframeKey}
+                  srcDoc={webAppHtml || DEFAULT_STARTER_WEBAPP_HTML}
+                  title={`Live Preview of ${cleanAppSlug}`}
+                  className="w-full h-full border-0 bg-white"
+                  sandbox="allow-scripts allow-forms allow-modals allow-same-origin allow-popups"
+                />
+              </div>
+            </div>
+
+            {/* In-Canvas Source Code Editor Drawer */}
+            {showWebSourceEditor && (
+              <div className="w-80 sm:w-96 h-full bg-[#1F1E1D] text-[#E0DCD5] border-l border-[#33302C] flex flex-col z-10 shrink-0 shadow-xl">
+                <div className="p-2.5 bg-[#151413] border-b border-[#2B2824] flex items-center justify-between text-xs">
+                  <span className="font-bold text-white flex items-center gap-1.5">
+                    <Code2 className="w-3.5 h-3.5 text-emerald-400" />
+                    index.html
+                  </span>
+                  <div className="flex items-center gap-1.5">
+                    {isEditingWebCode ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={handleSaveCustomWebCode}
+                          className="px-2 py-0.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold"
+                        >
+                          Save
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditableWebHtml(webAppHtml);
+                            setIsEditingWebCode(false);
+                          }}
+                          className="px-1.5 py-0.5 text-[10px] text-[#888] hover:text-white"
+                        >
+                          Cancel
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setIsEditingWebCode(true)}
+                        className="px-2 py-0.5 rounded bg-[#2B2824] hover:bg-[#38342E] text-white text-[10px] font-medium"
+                      >
+                        Edit
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setShowWebSourceEditor(false)}
+                      className="p-1 text-[#888] hover:text-white"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex-1 p-2.5 overflow-auto font-mono text-[11px] leading-relaxed">
+                  {isEditingWebCode ? (
+                    <textarea
+                      value={editableWebHtml}
+                      onChange={(e) => setEditableWebHtml(e.target.value)}
+                      className="w-full h-full bg-transparent text-emerald-400 font-mono text-[11px] outline-hidden resize-none"
+                      spellCheck={false}
+                    />
+                  ) : (
+                    <pre className="text-neutral-300 whitespace-pre-wrap">{webAppHtml || DEFAULT_STARTER_WEBAPP_HTML}</pre>
+                  )}
+                </div>
+
+                <div className="p-2 bg-[#151413] border-t border-[#2B2824] flex items-center justify-between text-[10px] text-[#888]">
+                  <span>Syncs across tabs</span>
+                  <button
+                    type="button"
+                    onClick={handleResetWebStarter}
+                    className="text-amber-400 hover:underline cursor-pointer"
+                  >
+                    Reset Template
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Domain & Android Hosting Modal */}
+          {showWebDomainModal && (
+            <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl border border-[#D5D0C7] shadow-2xl max-w-md w-full p-5 space-y-4 animate-in fade-in zoom-in-95 duration-150">
+                <div className="flex items-start justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-700 flex items-center justify-center font-bold">
+                      <Globe className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h3 className="text-xs font-bold text-[#1F1E1D]">Domain Configuration</h3>
+                      <p className="text-[11px] text-[#736E67]">Directly host your web app or link your custom domain</p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowWebDomainModal(false)}
+                    className="p-1 rounded-md text-[#736E67] hover:text-[#1F1E1D] hover:bg-[#EFECE6] transition-colors"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                {/* Default Workspace URL */}
+                <div className="p-2.5 rounded-lg bg-[#FAF8F5] border border-[#E5E2DC] space-y-1">
+                  <div className="text-[10px] font-bold text-[#736E67] uppercase tracking-wider">
+                    Current Preview URL
+                  </div>
+                  <div className="flex items-center justify-between gap-1.5">
+                    <span className="font-mono text-xs text-[#1F1E1D] font-bold truncate">
+                      {activePreviewUrl}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleCopyPreviewUrl}
+                      className="px-2 py-0.5 rounded text-[11px] font-semibold bg-white border border-[#D5D0C7] hover:bg-[#EFECE6]"
+                    >
+                      {copiedPreviewUrl ? 'Copied' : 'Copy'}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Custom Domain Input */}
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-bold text-[#1F1E1D]">
+                    Link Custom Domain
+                  </label>
+                  <div className="flex gap-1.5">
+                    <input
+                      type="text"
+                      value={webCustomDomain}
+                      onChange={(e) => {
+                        setWebCustomDomain(e.target.value);
+                        setWebDomainSaved(false);
+                      }}
+                      placeholder="myapp.com or app.mybrand.com"
+                      className="flex-1 px-2.5 py-1.5 text-xs rounded-lg border border-[#D5D0C7] focus:outline-hidden focus:ring-2 focus:ring-[#1F1E1D]/20"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (webCustomDomain.trim()) setWebDomainSaved(true);
+                      }}
+                      className="px-3 py-1.5 text-xs font-bold rounded-lg bg-[#1F1E1D] text-white hover:bg-[#33302C]"
+                    >
+                      Save
+                    </button>
+                  </div>
+                  {webDomainSaved && (
+                    <p className="text-[11px] text-emerald-700 font-medium">
+                      ✓ Domain staged. Point DNS CNAME to <code className="font-bold">cname.alphanexai.vercel.app</code>.
+                    </p>
+                  )}
+                </div>
+
+                {/* Future Android app roadmap */}
+                <div className="p-2.5 rounded-lg bg-amber-50 border border-amber-200 text-[11px] text-amber-900 space-y-0.5">
+                  <div className="font-bold flex items-center gap-1">
+                    <Sparkles className="w-3 h-3 text-amber-600" />
+                    <span>Upcoming: Android App Packaging</span>
+                  </div>
+                  <p className="leading-relaxed">
+                    Automated domain SSL provisioning and Android APK building will allow direct export of native mobile applications.
+                  </p>
+                </div>
+
+                <div className="flex justify-end pt-1 border-t border-[#E5E2DC]">
+                  <button
+                    type="button"
+                    onClick={() => setShowWebDomainModal(false)}
+                    className="px-3 py-1.5 text-xs font-bold rounded-lg bg-[#FAF8F5] border border-[#D5D0C7] text-[#1F1E1D] hover:bg-[#EFECE6]"
+                  >
+                    Done
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Tab 1: Side-by-Side Monaco-Style Diff Viewer (Developer Mode Only) */}
       {currentMode === 'developer' && activeTab === 'diff' && (

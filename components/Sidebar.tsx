@@ -26,8 +26,14 @@ import {
   AlertTriangle,
   FileText,
   FileCode,
+  ExternalLink,
 } from 'lucide-react';
 import { UserProfileSettings, UserWallet, WorkMode, ChatThread } from '@/lib/types';
+import {
+  slugifyAppName,
+  DEFAULT_WEBAPP_NAME,
+  ACTIVE_APP_NAME_KEY,
+} from '@/lib/webapp-preview';
 
 interface SidebarProps {
   isOpen: boolean;
@@ -130,6 +136,41 @@ export default function Sidebar({
   const [confirmDeleteThreadId, setConfirmDeleteThreadId] = useState<string | null>(null);
   const [isConfirmingClearAll, setIsConfirmingClearAll] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // Web App Preview State (Developer Mode)
+  const [activeAppSlug, setActiveAppSlug] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem(ACTIVE_APP_NAME_KEY);
+      if (saved) return slugifyAppName(saved);
+    }
+    return DEFAULT_WEBAPP_NAME;
+  });
+
+  useEffect(() => {
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === ACTIVE_APP_NAME_KEY && e.newValue) {
+        setActiveAppSlug(slugifyAppName(e.newValue));
+      }
+    };
+    const handleCustom = (e: Event) => {
+      const ce = e as CustomEvent;
+      if (ce.detail?.appName) {
+        setActiveAppSlug(slugifyAppName(ce.detail.appName));
+      }
+    };
+    window.addEventListener('storage', handleStorage);
+    window.addEventListener('alphanex-webapp-updated', handleCustom);
+    return () => {
+      window.removeEventListener('storage', handleStorage);
+      window.removeEventListener('alphanex-webapp-updated', handleCustom);
+    };
+  }, []);
+
+  const sidebarOrigin =
+    typeof window !== 'undefined' && window.location.origin
+      ? window.location.origin
+      : 'https://alphanexai.vercel.app';
+  const sidebarPreviewUrl = `${sidebarOrigin}/workspace/${activeAppSlug}/preview`;
 
   const menuRef = useRef<HTMLDivElement>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
@@ -525,6 +566,20 @@ export default function Sidebar({
           >
             <Plus className="w-4 h-4" />
           </button>
+
+          {currentMode === 'developer' && (
+            <a
+              id="sidebar-collapsed-preview-btn"
+              href={sidebarPreviewUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="p-1.5 rounded-lg bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition-colors cursor-pointer border border-indigo-200"
+              title={`Open Live WebApp Preview in New Tab (${sidebarPreviewUrl})`}
+              aria-label="Web App Preview"
+            >
+              <ExternalLink className="w-4 h-4" />
+            </a>
+          )}
         </div>
 
         {/* Collapsed Avatar Trigger */}
@@ -622,6 +677,40 @@ export default function Sidebar({
               </button>
             )}
           </div>
+
+          {/* Developer Mode: Live Web App Preview Link Item */}
+          {currentMode === 'developer' && (
+            <div id="sidebar-developer-webapp-preview-box" className="p-2.5 rounded-xl bg-gradient-to-br from-indigo-50/90 to-purple-50/50 border border-indigo-200/80 shadow-2xs space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <div className="w-5 h-5 rounded-md bg-indigo-600 text-white flex items-center justify-center font-bold text-xs">
+                    <Globe className="w-3 h-3" />
+                  </div>
+                  <span className="text-xs font-bold text-[#1F1E1D]">Web App Preview</span>
+                </div>
+                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-emerald-100/90 text-emerald-800 border border-emerald-300/60">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                  Live
+                </span>
+              </div>
+
+              <div className="text-[10px] font-mono text-[#55504A] truncate bg-white/80 px-2 py-1 rounded border border-indigo-100">
+                /workspace/{activeAppSlug}/preview
+              </div>
+
+              <a
+                id="sidebar-open-webapp-preview-link"
+                href={sidebarPreviewUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-[#1F1E1D] hover:bg-[#33302C] text-white text-xs font-bold transition-colors shadow-xs"
+                title={`Open build in new browser tab (${sidebarPreviewUrl})`}
+              >
+                <ExternalLink className="w-3.5 h-3.5 text-amber-400" />
+                <span>Open in New Tab</span>
+              </a>
+            </div>
+          )}
         </div>
 
         {/* Chat Threads List (Grouped by Pinned, Today, Yesterday, Previous 7 Days, Older) */}
