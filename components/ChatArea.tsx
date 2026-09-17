@@ -39,6 +39,7 @@ interface ChatAreaProps {
   onOpenInCanvas: (diff?: DiffData, code?: string) => void;
   onSelectPrompt: (prompt: string) => void;
   userCredits: number;
+  onChangeMode?: (mode: WorkMode) => void;
 }
 
 export default function ChatArea({
@@ -51,6 +52,7 @@ export default function ChatArea({
   onOpenInCanvas,
   onSelectPrompt,
   userCredits,
+  onChangeMode,
 }: ChatAreaProps) {
   const [inputText, setInputText] = useState('');
   const [expandedThinking, setExpandedThinking] = useState<Record<string, boolean>>({});
@@ -162,6 +164,53 @@ export default function ChatArea({
         </div>
       )}
 
+      {/* Active Conversation Context & Mode Detection Bar */}
+      {messages.length > 0 && (
+        <div
+          id="chat-active-mode-bar"
+          className="px-4 sm:px-8 py-2 bg-[#F6F3EC] border-b border-[#E8E4DC] flex items-center justify-between text-xs text-[#736E67] shrink-0"
+        >
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-medium text-[#858079]">Active Mode:</span>
+            <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md bg-white border border-[#E0DCD4] font-semibold text-[#1F1E1D] shadow-2xs">
+              {currentMode === 'developer' && <Code2 className="w-3.5 h-3.5 text-blue-600" />}
+              {currentMode === 'researcher' && <Globe className="w-3.5 h-3.5 text-emerald-600" />}
+              {currentMode === 'general' && <Sparkles className="w-3.5 h-3.5 text-amber-600" />}
+              <span className="capitalize">{currentMode}</span>
+            </div>
+            <span className="text-[11px] text-[#8C877E] hidden md:inline">
+              {currentMode === 'developer'
+                ? '• Code inspection & interactive diffs'
+                : currentMode === 'researcher'
+                ? '• Live web grounding & verified citations'
+                : '• Conversational reasoning & drafting'}
+            </span>
+          </div>
+
+          {onChangeMode && (
+            <div className="flex items-center gap-1.5 text-[11px]">
+              <span className="text-[#858079] hidden sm:inline">Switch on the fly:</span>
+              <div className="flex items-center gap-1 bg-[#ECE8E0] p-0.5 rounded-lg border border-[#DDD8CE]">
+                {(['developer', 'researcher', 'general'] as WorkMode[]).map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => onChangeMode(m)}
+                    className={`px-2 py-0.5 rounded text-[10px] font-medium transition-colors cursor-pointer ${
+                      currentMode === m
+                        ? 'bg-white text-[#1F1E1D] font-bold shadow-2xs'
+                        : 'text-[#736E67] hover:text-[#1F1E1D]'
+                    }`}
+                  >
+                    {m.charAt(0).toUpperCase() + m.slice(1)}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Messages Stream Area */}
       <div
         id="chat-messages-stream"
@@ -225,6 +274,24 @@ export default function ChatArea({
           messages.map((message) => {
             const isAssistant = message.role === 'assistant';
             const isUser = message.role === 'user';
+            const isSystem = message.role === 'system';
+
+            if (isSystem) {
+              return (
+                <div
+                  key={message.id}
+                  id={`chat-message-${message.id}`}
+                  className="w-full flex items-center justify-center my-3"
+                >
+                  <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-[#F2EDE5] border border-[#DDD7CD] text-xs text-[#55504A] font-medium shadow-2xs">
+                    {message.mode === 'developer' && <Code2 className="w-3.5 h-3.5 text-blue-600" />}
+                    {message.mode === 'researcher' && <Globe className="w-3.5 h-3.5 text-emerald-600" />}
+                    {message.mode === 'general' && <Sparkles className="w-3.5 h-3.5 text-amber-600" />}
+                    <span>{message.content}</span>
+                  </div>
+                </div>
+              );
+            }
 
             return (
               <div
@@ -469,15 +536,43 @@ export default function ChatArea({
             onSubmit={handleSubmit}
             className="flex items-center gap-1.5 px-2 py-1.5 rounded-full border border-[#E5E2DC] bg-[#FDFBF7] shadow-xs focus-within:border-[#A8A298] focus-within:ring-2 focus-within:ring-[#B8B2A6]/20 transition-all"
           >
-            {/* Left Mode / Sparkle Pill */}
-            <div
-              className="shrink-0 flex items-center justify-center w-7 h-7 rounded-full bg-[#F0ECE4] text-[#4D4943] select-none"
-              title={`Mode: ${currentMode} · ${selectedModel.name}`}
-            >
-              {currentMode === 'developer' && <Code2 className="w-3.5 h-3.5 text-blue-600" />}
-              {currentMode === 'researcher' && <Globe className="w-3.5 h-3.5 text-emerald-600" />}
-              {currentMode === 'general' && <Sparkles className="w-3.5 h-3.5 text-amber-600" />}
-            </div>
+            {/* Left Mode / Sparkle Pill with On-The-Fly Mode Switcher */}
+            {onChangeMode ? (
+              <button
+                type="button"
+                id="chat-mode-quick-switch-btn"
+                onClick={() => {
+                  const nextMode: WorkMode =
+                    currentMode === 'developer'
+                      ? 'researcher'
+                      : currentMode === 'researcher'
+                      ? 'general'
+                      : 'developer';
+                  onChangeMode(nextMode);
+                }}
+                className="shrink-0 flex items-center justify-center w-7 h-7 rounded-full bg-[#F0ECE4] hover:bg-[#E5E0D8] text-[#4D4943] transition-colors cursor-pointer select-none"
+                title={`Active: ${currentMode.toUpperCase()} mode. Click to switch to ${
+                  currentMode === 'developer'
+                    ? 'RESEARCHER'
+                    : currentMode === 'researcher'
+                    ? 'GENERAL'
+                    : 'DEVELOPER'
+                } mode on the fly`}
+              >
+                {currentMode === 'developer' && <Code2 className="w-3.5 h-3.5 text-blue-600" />}
+                {currentMode === 'researcher' && <Globe className="w-3.5 h-3.5 text-emerald-600" />}
+                {currentMode === 'general' && <Sparkles className="w-3.5 h-3.5 text-amber-600" />}
+              </button>
+            ) : (
+              <div
+                className="shrink-0 flex items-center justify-center w-7 h-7 rounded-full bg-[#F0ECE4] text-[#4D4943] select-none"
+                title={`Mode: ${currentMode} · ${selectedModel.name}`}
+              >
+                {currentMode === 'developer' && <Code2 className="w-3.5 h-3.5 text-blue-600" />}
+                {currentMode === 'researcher' && <Globe className="w-3.5 h-3.5 text-emerald-600" />}
+                {currentMode === 'general' && <Sparkles className="w-3.5 h-3.5 text-amber-600" />}
+              </div>
+            )}
 
             {/* Inline Textarea */}
             <textarea

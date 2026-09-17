@@ -4,15 +4,31 @@ let _deepseekInstance: OpenAI | null = null;
 
 export function getDeepSeekClient(): OpenAI {
   if (!_deepseekInstance) {
-    const apiKey = process.env.DEEPSEEK_API_KEY;
+    const apiKey =
+      process.env.DEEPSEEK_API_KEY ||
+      process.env.OPENROUTER_API_KEY ||
+      process.env.openrouter_api_key;
+
     if (!apiKey) {
       throw new Error(
-        'DEEPSEEK_API_KEY is not configured. Please add DEEPSEEK_API_KEY to your environment variables.'
+        'Neither DEEPSEEK_API_KEY nor OPENROUTER_API_KEY is configured. Please configure your API key in environment settings.'
       );
     }
+
+    const isOpenRouter = !process.env.DEEPSEEK_API_KEY && Boolean(process.env.OPENROUTER_API_KEY || process.env.openrouter_api_key);
+    const baseURL =
+      process.env.DEEPSEEK_BASE_URL ||
+      (isOpenRouter ? 'https://openrouter.ai/api/v1' : 'https://api.deepseek.com');
+
     _deepseekInstance = new OpenAI({
       apiKey,
-      baseURL: process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com',
+      baseURL,
+      defaultHeaders: isOpenRouter
+        ? {
+            'HTTP-Referer': process.env.APP_URL || 'https://aistudio-build.local',
+            'X-Title': 'AI Festa Studio',
+          }
+        : undefined,
     });
   }
   return _deepseekInstance;
@@ -32,4 +48,8 @@ export const deepseek = new Proxy({} as OpenAI, {
   },
 });
 
-export const MODEL_ID = process.env.DEEPSEEK_MODEL || 'deepseek-chat';
+export const MODEL_ID =
+  process.env.DEEPSEEK_MODEL ||
+  (!process.env.DEEPSEEK_API_KEY && (process.env.OPENROUTER_API_KEY || process.env.openrouter_api_key)
+    ? 'deepseek/deepseek-chat'
+    : 'deepseek-chat');

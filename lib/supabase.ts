@@ -18,214 +18,7 @@ export const THREADS_STORAGE_KEY = 'ai_festa_chat_threads_v2';
 // Static deterministic timestamp baseline to eliminate SSR-client hydration mismatch
 const STATIC_REF_TIME = 1757746800000;
 
-export const INITIAL_THREADS: ChatThread[] = [
-  {
-    id: 't-1',
-    title: 'eSewa v2 HMAC-SHA256 Signature Fix',
-    createdAt: STATIC_REF_TIME - 1000 * 60 * 15,
-    updatedAt: STATIC_REF_TIME - 1000 * 60 * 10,
-    mode: 'developer',
-    modelId: 'deepseek-v4-1-flash',
-    isPinned: true,
-    snippet: 'EPAY v2 base64 digest and secret key verification',
-    messages: [
-      {
-        id: 'msg-1',
-        role: 'user',
-        content:
-          'We are getting `INVALID_SIGNATURE` from the eSewa epay v2 UAT sandbox during checkout redirect. Can you review our HMAC-SHA256 generation logic?',
-        timestamp: STATIC_REF_TIME - 1000 * 60 * 15,
-        mode: 'developer',
-        modelId: 'deepseek-v4-1-flash',
-      },
-      {
-        id: 'msg-2',
-        role: 'assistant',
-        content: `I've analyzed your eSewa epay v2 verification code against the official Nepal eSewa Developer Guidelines. The root cause is a parameter ordering mismatch in the signature string and hex vs base64 encoding.
-
-### Issues Identified:
-1. **Parameter Sequence**: eSewa v2 strictly requires parameters in the exact format: \`total_amount,transaction_uuid,product_code\`.
-2. **Digest Encoding**: Unlike v1 which accepted hex digests, v2 requires a raw binary HMAC digest encoded in **Base64**.
-3. **Timing-Safe Verification**: Use \`crypto.timingSafeEqual\` to prevent side-channel timing attacks.
-
-I've generated a clean interactive diff for your review in the Dev Canvas drawer. Click **Open in Canvas** to inspect the live changes and run tests.`,
-        timestamp: STATIC_REF_TIME - 1000 * 60 * 10,
-        mode: 'developer',
-        modelId: 'deepseek-v4-1-flash',
-        diffData: INITIAL_DIFF_SAMPLE,
-      },
-    ],
-  },
-  {
-    id: 't-2',
-    title: 'Devanagari Unicode Normalizer (ZWJ)',
-    createdAt: STATIC_REF_TIME - 1000 * 60 * 120,
-    updatedAt: STATIC_REF_TIME - 1000 * 60 * 95,
-    mode: 'developer',
-    modelId: 'qwen-3-8-flash',
-    snippet: 'Python normalizer for zero-width joiners and Chandrabindu',
-    messages: [
-      {
-        id: 'msg-3',
-        role: 'user',
-        content:
-          'Write a fast Python normalizer for Nepali text datasets that removes orphaned Zero Width Joiners (U+200D) and canonicalizes Chandrabindu vs Anusvara.',
-        timestamp: STATIC_REF_TIME - 1000 * 60 * 120,
-        mode: 'developer',
-        modelId: 'qwen-3-8-flash',
-      },
-      {
-        id: 'msg-4',
-        role: 'assistant',
-        content: `Here is a production-grade Unicode normalizer tailored for Nepali NLP corpora:
-
-\`\`\`python
-import unicodedata
-import re
-
-ZWJ = "\\u200D"
-ZWNJ = "\\u200C"
-
-def normalize_nepali_text(text: str) -> str:
-    # 1. Canonical Unicode normalization (NFC)
-    text = unicodedata.normalize("NFC", text)
-    
-    # 2. Clean invalid zero-width characters not attached to halant
-    text = re.sub(r"(?<!\\u094D)[" + ZWJ + ZWNJ + "]", "", text)
-    
-    # 3. Clean repetitive Chandrabindu (ँ) / Anusvara (ं)
-    text = re.sub(r"[\\u0901\\u0902]+", "\\u0902", text)
-    
-    return text.strip()
-\`\`\`
-This achieves zero regressions on the Nepali Sentiment Corpus benchmarks.`,
-        timestamp: STATIC_REF_TIME - 1000 * 60 * 95,
-        mode: 'developer',
-        modelId: 'qwen-3-8-flash',
-      },
-    ],
-  },
-  {
-    id: 't-3',
-    title: 'Nepal AI Policy & NREN 2026 Analysis',
-    createdAt: STATIC_REF_TIME - 1000 * 60 * 60 * 24,
-    updatedAt: STATIC_REF_TIME - 1000 * 60 * 60 * 20,
-    mode: 'researcher',
-    modelId: 'gemini-3-8-flash',
-    isPinned: true,
-    snippet: 'MoCIT strategic framework & National Data Center status',
-    messages: [
-      {
-        id: 'msg-5',
-        role: 'user',
-        content:
-          'Summarize the key recommendations of the MoCIT Nepal National AI Strategy Draft and high-speed research networking via NREN.',
-        timestamp: STATIC_REF_TIME - 1000 * 60 * 60 * 24,
-        mode: 'researcher',
-        modelId: 'gemini-3-8-flash',
-      },
-      {
-        id: 'msg-6',
-        role: 'assistant',
-        content: `### Strategic Assessment: Nepal AI Policy Framework (2026)
-
-Based on documentation from the **Ministry of Communication and Information Technology (MoCIT)** and the **Nepal Research and Education Network (NREN)**:
-
-1. **National Sovereign Compute Cluster**:
-   - Recommendation to allocate a dedicated GPU acceleration pod inside the Government Integrated Data Center (GIDC) in Singha Durbar and Hetauda Disaster Recovery site.
-2. **Open Nepali Linguistic Datasets**:
-   - Mandating open access to digitized government archives for Nepali language model training.
-3. **Academic Connectivity via NREN**:
-   - 10Gbps interconnect between IOE Pulchowk, Kathmandu University, and NAST to support decentralized model inference.`,
-        timestamp: STATIC_REF_TIME - 1000 * 60 * 60 * 20,
-        mode: 'researcher',
-        modelId: 'gemini-3-8-flash',
-        citations: [
-          {
-            id: 'c-1',
-            title: 'MoCIT Draft National Strategy on AI & Emerging Tech',
-            url: 'https://mocit.gov.np',
-            snippet: 'Strategic priorities for artificial intelligence infrastructure and capacity building in Nepal.',
-            source: 'MoCIT Official Gazette',
-            reliability: 'high',
-          },
-          {
-            id: 'c-2',
-            title: 'NREN High-Performance Computing Research Grid',
-            url: 'https://nren.net.np',
-            snippet: 'Nepal Research and Education Network gigabit peering and campus research clusters.',
-            source: 'NREN Technical Paper',
-            reliability: 'high',
-          },
-        ],
-      },
-    ],
-  },
-  {
-    id: 't-4',
-    title: 'NRB Digital Wallet vs QR Volume FY26',
-    createdAt: STATIC_REF_TIME - 1000 * 60 * 60 * 72,
-    updatedAt: STATIC_REF_TIME - 1000 * 60 * 60 * 70,
-    mode: 'researcher',
-    modelId: 'deepseek-v4-pro',
-    snippet: 'Nepal Rastra Bank indicators: Fonepay, eSewa, Khalti',
-    messages: [
-      {
-        id: 'msg-7',
-        role: 'user',
-        content: 'What are the latest QR vs digital wallet transaction volumes reported by Nepal Rastra Bank?',
-        timestamp: STATIC_REF_TIME - 1000 * 60 * 60 * 72,
-        mode: 'researcher',
-        modelId: 'deepseek-v4-pro',
-      },
-      {
-        id: 'msg-8',
-        role: 'assistant',
-        content: `According to the latest **Nepal Rastra Bank (NRB) Payment Systems Indicators**:
-
-* **QR Code Transactions (Fonepay, NepalPay, SmartQR)**: Exceeded **NPR 45.2 Billion** monthly, representing a 68% year-over-year growth.
-* **Digital Wallets (eSewa, Khalti, IME Pay)**: Wallet transaction count reached **28.4 Million** monthly transactions.
-* **Key Insight**: Interoperable QR transactions have surpassed peer-to-peer wallet transfers for merchant retail payments in urban centers like Kathmandu and Pokhara.`,
-        timestamp: STATIC_REF_TIME - 1000 * 60 * 60 * 70,
-        mode: 'researcher',
-        modelId: 'deepseek-v4-pro',
-      },
-    ],
-  },
-  {
-    id: 't-5',
-    title: 'Kathmandu AgriTech Pitch Deck Draft',
-    createdAt: STATIC_REF_TIME - 1000 * 60 * 60 * 120,
-    updatedAt: STATIC_REF_TIME - 1000 * 60 * 60 * 118,
-    mode: 'general',
-    modelId: 'gemini-2.5-flash',
-    snippet: 'Mustang apple supply chain wholesale logistics pitch',
-    messages: [
-      {
-        id: 'msg-9',
-        role: 'user',
-        content: 'Draft a 5-slide outline for an AgriTech startup connecting Mustang apple farmers with Kathmandu wholesale grocers.',
-        timestamp: STATIC_REF_TIME - 1000 * 60 * 60 * 120,
-        mode: 'general',
-        modelId: 'gemini-2.5-flash',
-      },
-      {
-        id: 'msg-10',
-        role: 'assistant',
-        content: `Here is a high-impact 5-slide pitch structure tailored for Himalayan AgriTech:
-
-1. **Slide 1: Problem** — 35% post-harvest spoilage along Beni-Jomsom highway and middleman commission markups.
-2. **Slide 2: Solution** — Temperature-monitored cold chain booking and digital escrow settlement via eSewa/Khalti.
-3. **Slide 3: Market Size** — $42M annual apple and temperate fruit consumption in the Kathmandu valley.
-4. **Slide 4: Traction & Pilot** — 14 farmer cooperatives in Marpha and Kagbeni onboarded.
-5. **Slide 5: The Ask** — Seeking NPR 1.5 Crore seed round for refrigerated transit hubs in Pokhara.`,
-        timestamp: STATIC_REF_TIME - 1000 * 60 * 60 * 118,
-        mode: 'general',
-        modelId: 'gemini-2.5-flash',
-      },
-    ],
-  },
-];
+export const INITIAL_THREADS: ChatThread[] = [];
 
 export const INITIAL_USER_PROFILE: UserProfileSettings = {
   id: 'usr_nepal_builder_001',
@@ -391,8 +184,10 @@ export function revokeStoredOtherSessions(): ActiveSession[] {
 /**
  * Thread / Conversation Storage Functions
  */
+const DUMMY_THREAD_IDS = new Set(['t-1', 't-2', 't-3', 't-4', 't-5']);
+
 export function getStoredThreads(): ChatThread[] {
-  if (typeof window === 'undefined') return INITIAL_THREADS;
+  if (typeof window === 'undefined') return [];
   try {
     const raw = localStorage.getItem(THREADS_STORAGE_KEY);
     if (raw) {
@@ -400,19 +195,33 @@ export function getStoredThreads(): ChatThread[] {
       if (Array.isArray(parsed) && parsed.length > 0) {
         const seen = new Set<string>();
         const deduplicated: ChatThread[] = [];
+        let hadDummies = false;
+
         for (const item of parsed) {
           if (item && item.id && !seen.has(item.id)) {
+            if (DUMMY_THREAD_IDS.has(item.id)) {
+              hadDummies = true;
+              continue;
+            }
             seen.add(item.id);
             deduplicated.push(item);
           }
         }
-        return deduplicated.length > 0 ? deduplicated : INITIAL_THREADS;
+
+        // Clean up localStorage if dummy chats were present
+        if (hadDummies) {
+          try {
+            localStorage.setItem(THREADS_STORAGE_KEY, JSON.stringify(deduplicated));
+          } catch {}
+        }
+
+        return deduplicated;
       }
     }
   } catch (err) {
     console.error('Failed to parse stored threads', err);
   }
-  return INITIAL_THREADS;
+  return [];
 }
 
 export function saveStoredThreads(threads: ChatThread[]): void {
@@ -520,6 +329,21 @@ export function updateStoredThreadMessages(id: string, messages: ChatMessage[]):
           ...t,
           messages,
           snippet: snippet || t.snippet,
+          updatedAt: Date.now(),
+        }
+      : t
+  );
+  saveStoredThreads(updated);
+  return updated;
+}
+
+export function updateStoredThreadMode(id: string, mode: WorkMode): ChatThread[] {
+  const current = getStoredThreads();
+  const updated = current.map((t) =>
+    t.id === id
+      ? {
+          ...t,
+          mode,
           updatedAt: Date.now(),
         }
       : t

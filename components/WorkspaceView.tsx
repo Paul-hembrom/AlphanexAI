@@ -39,6 +39,7 @@ import {
   duplicateStoredThread,
   createStoredThread,
   updateStoredThreadMessages,
+  updateStoredThreadMode,
   clearAllStoredThreads,
   getStoredProfile,
   saveStoredProfile,
@@ -112,12 +113,10 @@ export default function WorkspaceView() {
   const [isConnectorsModalOpen, setIsConnectorsModalOpen] = useState(false);
   const [settingsInitialTab, setSettingsInitialTab] = useState<SettingsTabId>('profile');
 
-  // Sidebar & Threads State
+  // Sidebar & Threads State (Initialized empty to ensure only user's real chats appear)
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-  const [threads, setThreads] = useState<ChatThread[]>(INITIAL_THREADS);
-  const [activeThreadId, setActiveThreadId] = useState<string | null>(
-    INITIAL_THREADS[0]?.id || null
-  );
+  const [threads, setThreads] = useState<ChatThread[]>([]);
+  const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
 
   // User Wallet State
   const [wallet, setWallet] = useState<UserWallet>({
@@ -172,13 +171,11 @@ export default function WorkspaceView() {
   });
 
   // Canvas Active Data
-  const [activeDiffData, setActiveDiffData] = useState<DiffData | null>(INITIAL_DIFF_SAMPLE);
+  const [activeDiffData, setActiveDiffData] = useState<DiffData | null>(null);
   const [customCodeSnippet, setCustomCodeSnippet] = useState<string | undefined>(undefined);
 
-  // Chat Messages & Streaming State initialized from active thread
-  const [messages, setMessages] = useState<ChatMessage[]>(
-    INITIAL_THREADS[0]?.messages || []
-  );
+  // Chat Messages & Streaming State initialized empty
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
   const activeThreadIdRef = useRef<string | null>(activeThreadId);
@@ -233,14 +230,60 @@ export default function WorkspaceView() {
     return () => cancelAnimationFrame(frameId);
   }, []);
 
-  // Mode Switch Handler (updates default system instruction)
+  // Dynamic Mode Switch Handler (updates instructions, active thread, chat stream on the fly)
   const handleChangeMode = (newMode: WorkMode) => {
+    if (newMode === currentMode) return;
     setCurrentMode(newMode);
     setWorkspaceParams((prev) => ({
       ...prev,
       systemInstruction: DEFAULT_SYSTEM_INSTRUCTIONS[newMode],
-      groundingEnabled: newMode === 'researcher' ? true : prev.groundingEnabled,
+      groundingEnabled: newMode === 'researcher' ? true : (newMode === 'developer' ? false : prev.groundingEnabled),
     }));
+
+    // If there is an active thread, update thread's mode dynamically so user's thread persists in new mode
+    const currentActiveId = activeThreadIdRef.current;
+    if (currentActiveId) {
+      updateStoredThreadMode(currentActiveId, newMode);
+      setThreads((prev) =>
+        prev.map((t) =>
+          t.id === currentActiveId ? { ...t, mode: newMode, updatedAt: Date.now() } : t
+        )
+      );
+
+      // Append an informational system notice to the chat stream so mode switch is clearly visible on the fly
+      const modeLabels: Record<WorkMode, string> = {
+        developer: 'Developer Mode (Code Inspection & Side-by-Side Diffs active)',
+        researcher: 'Researcher Mode (Web Grounding & Academic Citations active)',
+        general: 'General Mode (Conversational Synthesis & Drafting active)',
+      };
+
+      const systemNotice: ChatMessage = {
+        id: `sys-mode-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        role: 'system',
+        content: `Mode switched to ${modeLabels[newMode]}`,
+        timestamp: Date.now(),
+        mode: newMode,
+        modelId: selectedModel.id,
+      };
+
+      setMessages((prev) => {
+        if (prev.length > 0) {
+          const updated = [...prev, systemNotice];
+          updateStoredThreadMessages(currentActiveId, updated);
+          return updated;
+        }
+        return prev;
+      });
+    }
+
+    // Update URL query parameter cleanly without reloading
+    if (typeof window !== 'undefined') {
+      try {
+        const url = new URL(window.location.href);
+        url.searchParams.set('mode', newMode);
+        window.history.replaceState({}, '', url.toString());
+      } catch {}
+    }
   };
 
   // Model Select Handler
@@ -278,19 +321,25 @@ export default function WorkspaceView() {
     if (!target) return;
     setActiveThreadId(threadId);
     setMessages(target.messages || []);
-    setCurrentMode(target.mode || 'developer');
+    if (target.mode) {
+      setCurrentMode(target.mode);
+      setWorkspaceParams((prev) => ({
+        ...prev,
+        systemInstruction: DEFAULT_SYSTEM_INSTRUCTIONS[target.mode],
+        groundingEnabled: target.mode === 'researcher' ? true : prev.groundingEnabled,
+      }));
+    }
 
     // If thread has diffData in any message, load into canvas
     const foundDiff = target.messages.find((m) => m.diffData)?.diffData;
-    if (foundDiff) {
-      setActiveDiffData(foundDiff);
-    }
+    setActiveDiffData(foundDiff || null);
   };
 
   // Start fresh new chat
   const handleNewChat = () => {
     setActiveThreadId(null);
     setMessages([]);
+    setActiveDiffData(null);
     setCustomCodeSnippet(undefined);
   };
 
@@ -806,6 +855,7 @@ export default function WorkspaceView() {
             onOpenInCanvas={handleOpenInCanvas}
             onSelectPrompt={(text) => handleSendMessage(text)}
             userCredits={wallet.credits}
+            onChangeMode={handleChangeMode}
           />
         </div>
 
