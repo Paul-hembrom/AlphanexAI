@@ -1,11 +1,12 @@
 'use client';
 
 import React, { useState, useRef, useEffect, useCallback, useSyncExternalStore } from 'react';
-import { ChevronRight, ChevronLeft, PanelRight, GripVertical } from 'lucide-react';
+import { ChevronRight, ChevronLeft, PanelRight, GripVertical, Terminal } from 'lucide-react';
 import Header from '@/components/Header';
 import Sidebar from '@/components/Sidebar';
 import ChatArea from '@/components/ChatArea';
 import CanvasDrawer from '@/components/CanvasDrawer';
+import TerminalOutputPanel from '@/components/TerminalOutputPanel';
 import ParameterDrawer from '@/components/ParameterDrawer';
 import PaymentModal from '@/components/PaymentModal';
 import SettingsModal, { SettingsTabId } from '@/components/settings/SettingsModal';
@@ -22,11 +23,19 @@ import {
   ChatThread,
   UserProfileSettings,
   WebappBuildData,
+  BuildStack,
 } from '@/lib/types';
 import {
   saveWebAppData,
   slugifyAppName,
   ACTIVE_APP_NAME_KEY,
+  getPreviewUrl,
+  validateHtmlSyntax,
+  TerminalLogEntry,
+  WebAppRuntimeStatus,
+  broadcastTerminalLog,
+  getStoredBuildStack,
+  setStoredBuildStack,
 } from '@/lib/webapp-preview';
 import {
   AVAILABLE_MODELS,
@@ -181,6 +190,47 @@ export default function WorkspaceView() {
   const [activeDiffData, setActiveDiffData] = useState<DiffData | null>(null);
   const [customCodeSnippet, setCustomCodeSnippet] = useState<string | undefined>(undefined);
 
+  // Dedicated Terminal Output Panel State
+  const [isTerminalOpen, setIsTerminalOpen] = useState(false);
+  const [terminalHeight, setTerminalHeight] = useState<number>(240);
+  const [activeWebAppName, setActiveWebAppName] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        return localStorage.getItem(ACTIVE_APP_NAME_KEY) || 'your-app-name';
+      } catch {}
+    }
+    return 'your-app-name';
+  });
+  const [selectedBuildStack, setSelectedBuildStack] = useState<BuildStack>(() => {
+    return getStoredBuildStack();
+  });
+
+  useEffect(() => {
+    const handleStackChanged = (event: Event) => {
+      const ce = event as CustomEvent<{ stack: BuildStack }>;
+      if (ce.detail?.stack) {
+        setSelectedBuildStack(ce.detail.stack);
+      }
+    };
+    window.addEventListener('alphanex-build-stack-changed', handleStackChanged);
+    return () => {
+      window.removeEventListener('alphanex-build-stack-changed', handleStackChanged);
+    };
+  }, []);
+  const [terminalLogs, setTerminalLogs] = useState<TerminalLogEntry[]>([
+    {
+      id: 'init-terminal-1',
+      timestamp: 0,
+      level: 'system',
+      message: 'Alphanex Studio Runtime & Terminal initialized. Ready for webapp output.',
+      source: 'system',
+    },
+  ]);
+  const [appRuntimeStatus, setAppRuntimeStatus] = useState<WebAppRuntimeStatus>('ready');
+
+  const terminalErrorCount = terminalLogs.filter((l) => l.level === 'error').length;
+  const terminalWarnCount = terminalLogs.filter((l) => l.level === 'warn').length;
+
   // Chat Messages & Streaming State initialized empty
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
@@ -236,6 +286,168 @@ export default function WorkspaceView() {
 
     return () => cancelAnimationFrame(frameId);
   }, []);
+
+  // Terminal Output & Web App Sandbox Log Capture
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    // 1. Window postMessage listener from iframe
+    const handleWindowMessage = (event: MessageEvent) => {
+      if (!event.data || typeof event.data !== 'object') return;
+
+      if (event.data.type === 'ALPHANEX_SANDBOX_LOG' && event.data.payload) {
+        const payload = event.data.payload as TerminalLogEntry;
+        setTerminalLogs((prev) => [...prev.slice(-499), payload]);
+        if (payload.level === 'error') {
+          setAppRuntimeStatus('error');
+        }
+      } else if (event.data.type === 'ALPHANEX_HMR_READY') {
+        setAppRuntimeStatus('ready');
+        setTerminalLogs((prev) => [
+          ...prev.slice(-499),
+          {
+            id: `hmr_ready_${Date.now()}`,
+            timestamp: Date.now(),
+            level: 'system',
+            message: `Sandbox iframe connected and ready (${event.data.domNodes || 'active'} DOM nodes)`,
+            source: 'runtime',
+          },
+        ]);
+      } else if (event.data.type === 'ALPHANEX_HMR_ACK') {
+        setAppRuntimeStatus('ready');
+        setTerminalLogs((prev) => [
+          ...prev.slice(-499),
+          {
+            id: `hmr_ack_${Date.now()}`,
+            timestamp: Date.now(),
+            level: 'hmr',
+            message: `[HMR] Update applied in ${event.data.elapsedMs || 0}ms (${event.data.status || 'success'})`,
+            source: 'hmr',
+          },
+        ]);
+      }
+    };
+
+    // 2. CustomEvent for terminal logs
+    const handleCustomLog = (e: Event) => {
+      const customEvt = e as CustomEvent<TerminalLogEntry>;
+      if (customEvt.detail) {
+        setTerminalLogs((prev) => [...prev.slice(-499), customEvt.detail]);
+        if (customEvt.detail.level === 'error') {
+          setAppRuntimeStatus('error');
+        }
+      }
+    };
+
+    // 3. Web app updated event (validates HTML syntax for compilation errors)
+    const handleWebAppUpdated = (e: Event) => {
+      const customEvt = e as CustomEvent<{ appName: string; html: string; isHmr?: boolean }>;
+      if (customEvt.detail) {
+        const appName = customEvt.detail.appName || 'your-app-name';
+        setActiveWebAppName(appName);
+
+        // Validate HTML syntax & script tags
+        const validation = validateHtmlSyntax(customEvt.detail.html);
+        if (!validation.valid) {
+          setAppRuntimeStatus('error');
+          validation.errors.forEach((err) => {
+            setTerminalLogs((prev) => [
+              ...prev.slice(-499),
+              {
+                id: `compile_err_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+                timestamp: Date.now(),
+                level: 'error',
+                message: err,
+                source: 'compiler',
+              },
+            ]);
+          });
+        } else {
+          setAppRuntimeStatus('ready');
+          setTerminalLogs((prev) => [
+            ...prev.slice(-499),
+            {
+              id: `compile_ok_${Date.now()}`,
+              timestamp: Date.now(),
+              level: 'build',
+              message: `Compilation verification passed for "${appName}". 0 syntax errors.`,
+              source: 'compiler',
+            },
+          ]);
+        }
+
+        if (validation.warnings.length > 0) {
+          validation.warnings.forEach((warn) => {
+            setTerminalLogs((prev) => [
+              ...prev.slice(-499),
+              {
+                id: `compile_warn_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+                timestamp: Date.now(),
+                level: 'warn',
+                message: warn,
+                source: 'compiler',
+              },
+            ]);
+          });
+        }
+      }
+    };
+
+    window.addEventListener('message', handleWindowMessage);
+    window.addEventListener('alphanex-terminal-log', handleCustomLog);
+    window.addEventListener('alphanex-webapp-updated', handleWebAppUpdated);
+
+    return () => {
+      window.removeEventListener('message', handleWindowMessage);
+      window.removeEventListener('alphanex-terminal-log', handleCustomLog);
+      window.removeEventListener('alphanex-webapp-updated', handleWebAppUpdated);
+    };
+  }, []);
+
+  const handleClearTerminalLogs = () => {
+    setTerminalLogs([]);
+  };
+
+  const handleSimulateTestLog = () => {
+    const clean = slugifyAppName(activeWebAppName);
+    const testEntry: TerminalLogEntry = {
+      id: `test_${Date.now()}`,
+      timestamp: Date.now(),
+      level: 'info',
+      message: `[Diagnostic Ping] Sandbox live link healthy at /workspace/${clean}/preview. Checking HMR channel.`,
+      source: 'diagnostics',
+    };
+    setTerminalLogs((prev) => [...prev, testEntry]);
+    if (typeof window !== 'undefined') {
+      const iframes = document.querySelectorAll('iframe');
+      iframes.forEach((ifr) => {
+        try {
+          ifr.contentWindow?.postMessage({ type: 'ALPHANEX_HMR_PING', timestamp: Date.now() }, '*');
+        } catch {}
+      });
+    }
+  };
+
+  const handleEvalInSandbox = (code: string) => {
+    if (typeof window !== 'undefined') {
+      const iframes = document.querySelectorAll('iframe');
+      iframes.forEach((ifr) => {
+        try {
+          ifr.contentWindow?.postMessage({ type: 'ALPHANEX_SANDBOX_EVAL', code }, '*');
+        } catch {}
+      });
+      setTerminalLogs((prev) => [
+        ...prev,
+        {
+          id: `eval_cmd_${Date.now()}`,
+          timestamp: Date.now(),
+          level: 'log',
+          message: `> ${code}`,
+          source: 'eval-input',
+        },
+      ]);
+    }
+  };
 
   // Dynamic Mode Switch Handler (updates instructions, active thread, chat stream on the fly)
   const handleChangeMode = (newMode: WorkMode) => {
@@ -502,6 +714,8 @@ export default function WorkspaceView() {
           modelId: selectedModel.id,
           reasoningEffort: currentMode === 'researcher' || selectedModel.supportsThinking ? reasoningEffort : undefined,
           params: workspaceParams,
+          buildStack: selectedBuildStack,
+          userSettings: userProfile,
           history: messages.slice(-6).map((m) => ({ role: m.role, content: m.content })),
         }),
         signal: abortController.signal,
@@ -584,9 +798,10 @@ export default function WorkspaceView() {
                   appName: (data.appName as string) || 'ecommerce-webapp',
                   html: (data.html as string) || '',
                   buildStatus: (data.buildStatus as any) || 'success',
-                  testsPassed: typeof data.testsPassed === 'number' ? data.testsPassed : 4,
-                  testsTotal: typeof data.testsTotal === 'number' ? data.testsTotal : 4,
-                  bugsFound: typeof data.bugsFound === 'number' ? data.bugsFound : 0,
+                  stack: (data.stack as BuildStack) || selectedBuildStack,
+                  testsPassed: typeof data.testsPassed === 'number' ? data.testsPassed : undefined,
+                  testsTotal: typeof data.testsTotal === 'number' ? data.testsTotal : undefined,
+                  bugsFound: typeof data.bugsFound === 'number' ? data.bugsFound : undefined,
                   features: Array.isArray(data.features) ? data.features : [],
                   rawCodeRequested: !!data.rawCodeRequested,
                   verificationLog: Array.isArray(data.verificationLog) ? data.verificationLog : [],
@@ -605,11 +820,26 @@ export default function WorkspaceView() {
 
                 // Save code into local web app sandbox
                 if (typeof window !== 'undefined' && buildData.html) {
-                  saveWebAppData(buildData.appName, buildData.html);
-                  localStorage.setItem(ACTIVE_APP_NAME_KEY, slugifyAppName(buildData.appName));
+                  const appSlug = slugifyAppName(buildData.appName);
+                  saveWebAppData(appSlug, buildData.html);
+                  localStorage.setItem(ACTIVE_APP_NAME_KEY, appSlug);
+                  broadcastTerminalLog({
+                    level: 'build',
+                    message: `Autonomous webapp build completed for "${buildData.appName}" (#${buildData.buildStatus}, ${buildData.testsPassed}/${buildData.testsTotal} tests passed)`,
+                    source: 'studio-builder',
+                  });
+                  if (buildData.verificationLog && buildData.verificationLog.length > 0) {
+                    buildData.verificationLog.forEach((log) => {
+                      broadcastTerminalLog({
+                        level: 'build',
+                        message: `[Verification] ${log}`,
+                        source: 'studio-verifier',
+                      });
+                    });
+                  }
                   window.dispatchEvent(
                     new CustomEvent('alphanex-webapp-updated', {
-                      detail: { appName: buildData.appName },
+                      detail: { appName: appSlug, html: buildData.html, isHmr: true },
                     })
                   );
                 }
@@ -637,6 +867,15 @@ export default function WorkspaceView() {
                   )
                 );
               } else if (data.type === 'error') {
+                broadcastTerminalLog({
+                  level: 'error',
+                  message: `Model generation notice: ${
+                    typeof data.error === 'string'
+                      ? data.error
+                      : 'Model stream timed out. Please retry or choose a different model tier.'
+                  }`,
+                  source: 'ai-engine',
+                });
                 setMessages((prev) =>
                   prev.map((msg) =>
                     msg.id === assistantMsgId
@@ -686,6 +925,11 @@ export default function WorkspaceView() {
     } catch (err: any) {
       if (err?.name !== 'AbortError') {
         console.error('Streaming request error:', err);
+        broadcastTerminalLog({
+          level: 'error',
+          message: `Network/API connection error: ${err?.message || 'Failed to stream response'}`,
+          source: 'network',
+        });
         setMessages((prev) =>
           prev.map((msg) =>
             msg.id === assistantMsgId
@@ -898,6 +1142,9 @@ export default function WorkspaceView() {
           setIsCanvasOpen(!isCanvasOpen);
           if (!isCanvasOpen) setIsCanvasFullWidth(false);
         }}
+        isTerminalOpen={isTerminalOpen}
+        onToggleTerminal={() => setIsTerminalOpen((prev) => !prev)}
+        terminalErrorCount={terminalErrorCount}
         activeMobileTab={activeMobileTab}
         onChangeMobileTab={setActiveMobileTab}
         isSidebarOpen={isSidebarOpen}
@@ -934,8 +1181,10 @@ export default function WorkspaceView() {
         />
 
         {/* Main Dual-Pane Workspace */}
-        <main id="workspace-main" ref={workspaceRef} className="flex-1 flex overflow-hidden relative">
-        {/* Left Pane (Chat Stream) - expands smoothly or hides when Canvas is snapped to full width */}
+        <main id="workspace-main" ref={workspaceRef} className="flex-1 flex flex-col overflow-hidden relative">
+          {/* Upper Workspace Split Pane (Chat + Canvas) */}
+          <div className="flex-1 flex overflow-hidden relative">
+            {/* Left Pane (Chat Stream) - expands smoothly or hides when Canvas is snapped to full width */}
         <div
           className={`flex-1 flex flex-col h-full overflow-hidden transition-all duration-200 ${
             activeMobileTab === 'canvas'
@@ -1099,6 +1348,7 @@ export default function WorkspaceView() {
             onCycleWidth={handleCycleWidth}
             diffData={activeDiffData}
             customCodeSnippet={customCodeSnippet}
+            currentBuildStack={selectedBuildStack}
             currentMode={currentMode}
             citations={
               [...messages]
@@ -1149,8 +1399,111 @@ export default function WorkspaceView() {
           onChangeParams={setWorkspaceParams}
           currentMode={currentMode}
           selectedModel={selectedModel}
+          buildStack={selectedBuildStack}
+          onChangeBuildStack={(s) => setSelectedBuildStack(s)}
         />
-      </main>
+      </div>
+
+      {/* Dedicated Web Application Terminal Output Panel */}
+      <TerminalOutputPanel
+        isOpen={isTerminalOpen}
+        onClose={() => setIsTerminalOpen(false)}
+        height={terminalHeight}
+        onResizeHeight={setTerminalHeight}
+        activeAppName={activeWebAppName}
+        logs={terminalLogs}
+        onClearLogs={handleClearTerminalLogs}
+        onSimulateTestLog={handleSimulateTestLog}
+        onEvalInSandbox={handleEvalInSandbox}
+        runtimeStatus={appRuntimeStatus}
+      />
+
+      {/* Bottom Dock Status & Terminal Trigger Bar */}
+      <div
+        id="workspace-terminal-statusbar"
+        className="h-7 bg-[#141312] border-t border-[#262422] px-3 flex items-center justify-between text-xs text-[#8C867D] select-none shrink-0"
+      >
+        {/* Left: Terminal toggle button & error/warning counts */}
+        <div className="flex items-center gap-2.5">
+          <button
+            id="statusbar-toggle-terminal-btn"
+            type="button"
+            onClick={() => setIsTerminalOpen((prev) => !prev)}
+            className={`flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-medium transition-colors cursor-pointer ${
+              isTerminalOpen
+                ? 'bg-[#2A2724] text-white font-semibold'
+                : terminalErrorCount > 0
+                ? 'bg-red-950/80 text-red-300 font-bold border border-red-800'
+                : 'hover:bg-[#22201D] hover:text-[#D5D0C7]'
+            }`}
+            title={isTerminalOpen ? 'Collapse terminal panel' : 'Open terminal panel'}
+          >
+            <Terminal className="w-3 h-3 text-emerald-400" />
+            <span>Terminal</span>
+            {terminalErrorCount > 0 && (
+              <span className="px-1 py-0.2 rounded bg-red-600 text-white text-[9px] font-extrabold leading-none">
+                {terminalErrorCount}
+              </span>
+            )}
+            {terminalWarnCount > 0 && (
+              <span className="px-1 py-0.2 rounded bg-amber-600 text-white text-[9px] font-extrabold leading-none">
+                {terminalWarnCount}
+              </span>
+            )}
+          </button>
+
+          <span className="text-[#3D3934]">|</span>
+
+          {/* Sandbox Runtime Status */}
+          <div className="flex items-center gap-1.5 text-[11px]">
+            <span
+              className={`w-1.5 h-1.5 rounded-full ${
+                appRuntimeStatus === 'compiling'
+                  ? 'bg-purple-400 animate-spin'
+                  : appRuntimeStatus === 'hot-reloading'
+                  ? 'bg-amber-400 animate-bounce'
+                  : appRuntimeStatus === 'error' || terminalErrorCount > 0
+                  ? 'bg-red-400'
+                  : 'bg-emerald-400 animate-pulse'
+              }`}
+            />
+            <span className="text-[#A69F94]">
+              {appRuntimeStatus === 'compiling'
+                ? 'Compiling...'
+                : appRuntimeStatus === 'hot-reloading'
+                ? 'HMR Reload'
+                : appRuntimeStatus === 'error' || terminalErrorCount > 0
+                ? 'Runtime Error'
+                : 'Sandbox Ready'}
+            </span>
+          </div>
+
+          {/* Active App preview link */}
+          <a
+            href={getPreviewUrl(slugifyAppName(activeWebAppName))}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="hidden sm:inline text-[11px] font-mono text-[#736E67] hover:text-[#C4BEB4] transition-colors"
+            title="Open dedicated preview tab in new window"
+          >
+            /workspace/{slugifyAppName(activeWebAppName)}/preview
+          </a>
+        </div>
+
+        {/* Right: Quick actions */}
+        <div className="flex items-center gap-2 text-[11px]">
+          <span className="text-[#55504A]">Logs: {terminalLogs.length}</span>
+          <button
+            id="statusbar-toggle-visibility-btn"
+            type="button"
+            onClick={() => setIsTerminalOpen((prev) => !prev)}
+            className="text-[#8C867D] hover:text-white transition-colors cursor-pointer font-medium"
+          >
+            {isTerminalOpen ? 'Hide Terminal' : 'Show Terminal'}
+          </button>
+        </div>
+      </div>
+    </main>
     </div>
 
       {/* Localized Nepali Payment & Credit Top-Up Modal (eSewa & Khalti) */}

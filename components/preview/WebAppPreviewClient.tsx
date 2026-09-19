@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import {
   Globe,
@@ -17,12 +17,15 @@ import {
   X,
   Sparkles,
   Code2,
+  Zap,
 } from 'lucide-react';
 import {
   getWebAppData,
   saveWebAppData,
   getPreviewUrl,
   slugifyAppName,
+  prepareHmrHtml,
+  sendHmrUpdateToWindow,
   DEFAULT_STARTER_WEBAPP_HTML,
 } from '@/lib/webapp-preview';
 
@@ -37,6 +40,10 @@ export default function WebAppPreviewClient({ appName }: WebAppPreviewClientProp
   const [viewport, setViewport] = useState<ViewportMode>('desktop');
   const [htmlCode, setHtmlCode] = useState<string>(() => getWebAppData(cleanAppName).html);
   const [iframeKey, setIframeKey] = useState<number>(0);
+  const [autoRefreshEnabled, setAutoRefreshEnabled] = useState<boolean>(true);
+  const [hmrStatus, setHmrStatus] = useState<'idle' | 'updating' | 'hot-updated'>('idle');
+  const [lastHmrTime, setLastHmrTime] = useState<Date | null>(null);
+
   const [copiedLink, setCopiedLink] = useState<boolean>(false);
   const [showDomainModal, setShowDomainModal] = useState<boolean>(false);
   const [customDomainInput, setCustomDomainInput] = useState<string>('');
@@ -47,24 +54,95 @@ export default function WebAppPreviewClient({ appName }: WebAppPreviewClientProp
 
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
-  // Listen to external storage and custom events
+  // Apply HMR without destroying the iframe element
+  const applyHotModuleReplacement = useCallback(
+    (newHtml: string, forceReload?: boolean) => {
+      setHtmlCode(newHtml);
+      setEditableCode(newHtml);
+
+      if (forceReload) {
+        setIframeKey((prev) => prev + 1);
+        setHmrStatus('hot-updated');
+        setLastHmrTime(new Date());
+        setTimeout(() => setHmrStatus('idle'), 2500);
+        return;
+      }
+
+      if (!autoRefreshEnabled) {
+        return;
+      }
+
+      setHmrStatus('updating');
+
+      // 1. PostMessage to iframe HMR runtime
+      let posted = false;
+      if (iframeRef.current?.contentWindow) {
+        posted = sendHmrUpdateToWindow(iframeRef.current.contentWindow, newHtml, cleanAppName);
+      }
+
+      // 2. Fallback soft-update if iframe doesn't respond
+      const timer = setTimeout(() => {
+        if (iframeRef.current && (!posted || hmrStatus === 'updating')) {
+          try {
+            iframeRef.current.srcdoc = prepareHmrHtml(newHtml);
+            setHmrStatus('hot-updated');
+            setLastHmrTime(new Date());
+          } catch {
+            setIframeKey((prev) => prev + 1);
+          }
+          setTimeout(() => setHmrStatus('idle'), 2500);
+        }
+      }, 500);
+
+      return () => clearTimeout(timer);
+    },
+    [cleanAppName, autoRefreshEnabled, hmrStatus]
+  );
+
+  // Listen for HMR Acknowledgement from inside iframe sandbox
+  useEffect(() => {
+    const handleHmrAck = (e: MessageEvent) => {
+      if (!e.data || typeof e.data !== 'object') return;
+      if (e.data.type === 'ALPHANEX_HMR_ACK') {
+        setHmrStatus('hot-updated');
+        setLastHmrTime(new Date());
+        setTimeout(() => setHmrStatus('idle'), 2500);
+      }
+    };
+    window.addEventListener('message', handleHmrAck);
+    return () => window.removeEventListener('message', handleHmrAck);
+  }, []);
+
+  // Listen to external storage, custom events, and cross-tab BroadcastChannel
   useEffect(() => {
     const handleStorageChange = (e: StorageEvent) => {
       if (e.key === `alphanex_webapp_code_${cleanAppName}` && e.newValue) {
-        setHtmlCode(e.newValue);
-        setEditableCode(e.newValue);
-        setIframeKey((prev) => prev + 1);
+        applyHotModuleReplacement(e.newValue);
       }
     };
 
     const handleCustomEvent = (e: Event) => {
       const ce = e as CustomEvent;
       if (ce.detail?.appName === cleanAppName && ce.detail?.html) {
-        setHtmlCode(ce.detail.html);
-        setEditableCode(ce.detail.html);
-        setIframeKey((prev) => prev + 1);
+        applyHotModuleReplacement(ce.detail.html);
       }
     };
+
+    let bc: BroadcastChannel | null = null;
+    if (typeof BroadcastChannel !== 'undefined') {
+      try {
+        bc = new BroadcastChannel('alphanex_webapp_hmr');
+        bc.onmessage = (event) => {
+          if (
+            event.data?.type === 'ALPHANEX_HMR_UPDATE' &&
+            event.data?.appName === cleanAppName &&
+            event.data?.html
+          ) {
+            applyHotModuleReplacement(event.data.html);
+          }
+        };
+      } catch {}
+    }
 
     window.addEventListener('storage', handleStorageChange);
     window.addEventListener('alphanex-webapp-updated', handleCustomEvent);
@@ -72,8 +150,9 @@ export default function WebAppPreviewClient({ appName }: WebAppPreviewClientProp
     return () => {
       window.removeEventListener('storage', handleStorageChange);
       window.removeEventListener('alphanex-webapp-updated', handleCustomEvent);
+      if (bc) bc.close();
     };
-  }, [cleanAppName]);
+  }, [cleanAppName, applyHotModuleReplacement]);
 
   const previewUrl = typeof window !== 'undefined' ? window.location.href : getPreviewUrl(cleanAppName);
 
@@ -86,21 +165,18 @@ export default function WebAppPreviewClient({ appName }: WebAppPreviewClientProp
   };
 
   const handleRefreshIframe = () => {
-    setIframeKey((prev) => prev + 1);
+    applyHotModuleReplacement(htmlCode, true);
   };
 
   const handleSaveCode = () => {
     saveWebAppData(cleanAppName, editableCode);
-    setHtmlCode(editableCode);
-    setIframeKey((prev) => prev + 1);
+    applyHotModuleReplacement(editableCode);
     setIsEditingCode(false);
   };
 
   const handleResetStarter = () => {
     saveWebAppData(cleanAppName, DEFAULT_STARTER_WEBAPP_HTML);
-    setHtmlCode(DEFAULT_STARTER_WEBAPP_HTML);
-    setEditableCode(DEFAULT_STARTER_WEBAPP_HTML);
-    setIframeKey((prev) => prev + 1);
+    applyHotModuleReplacement(DEFAULT_STARTER_WEBAPP_HTML, true);
     setIsEditingCode(false);
   };
 
@@ -189,6 +265,56 @@ export default function WebAppPreviewClient({ appName }: WebAppPreviewClientProp
 
         {/* Right: Actions, Domain Config & Copy */}
         <div className="flex items-center gap-2">
+          {/* HMR Auto-Refresh Toggle & Indicator */}
+          <button
+            type="button"
+            onClick={() => setAutoRefreshEnabled(!autoRefreshEnabled)}
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold border transition-all cursor-pointer ${
+              !autoRefreshEnabled
+                ? 'bg-[#F0ECE4] text-[#888] border-[#D5D0C7] hover:bg-[#E5E2DC]'
+                : hmrStatus === 'updating'
+                ? 'bg-amber-50 text-amber-800 border-amber-300 shadow-xs'
+                : hmrStatus === 'hot-updated'
+                ? 'bg-emerald-50 text-emerald-800 border-emerald-300 shadow-xs'
+                : 'bg-white text-emerald-700 border-emerald-300 hover:bg-emerald-50/50'
+            }`}
+            title={
+              autoRefreshEnabled
+                ? 'Auto-refresh / HMR is active. Code updates from Studio hot-swap instantly into sandbox. Click to pause.'
+                : 'Auto-refresh is paused. Click to resume instant HMR.'
+            }
+          >
+            <Zap
+              className={`w-3.5 h-3.5 ${
+                !autoRefreshEnabled
+                  ? 'text-[#999]'
+                  : hmrStatus === 'updating'
+                  ? 'text-amber-600 animate-bounce'
+                  : 'text-emerald-600'
+              }`}
+            />
+            <span className="hidden sm:inline">
+              {!autoRefreshEnabled
+                ? 'HMR Paused'
+                : hmrStatus === 'updating'
+                ? 'Hot Swapping...'
+                : hmrStatus === 'hot-updated'
+                ? 'Hot Updated'
+                : 'HMR Active'}
+            </span>
+            {autoRefreshEnabled && (
+              <span
+                className={`w-1.5 h-1.5 rounded-full ${
+                  hmrStatus === 'updating'
+                    ? 'bg-amber-500 animate-ping'
+                    : hmrStatus === 'hot-updated'
+                    ? 'bg-emerald-500'
+                    : 'bg-emerald-500 animate-pulse'
+                }`}
+              />
+            )}
+          </button>
+
           {/* Refresh iframe */}
           <button
             type="button"
@@ -255,7 +381,7 @@ export default function WebAppPreviewClient({ appName }: WebAppPreviewClientProp
             <iframe
               key={iframeKey}
               ref={iframeRef}
-              srcDoc={htmlCode || DEFAULT_STARTER_WEBAPP_HTML}
+              srcDoc={prepareHmrHtml(htmlCode || DEFAULT_STARTER_WEBAPP_HTML)}
               title={`Preview of ${cleanAppName}`}
               className="w-full h-full border-0 bg-white"
               sandbox="allow-scripts allow-forms allow-modals allow-same-origin allow-popups"

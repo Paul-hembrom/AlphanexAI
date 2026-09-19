@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   X,
   Code2,
@@ -39,9 +39,10 @@ import {
   Monitor,
   Tablet,
   Smartphone,
+  Zap,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
-import { DiffData, WorkMode, Citation } from '@/lib/types';
+import { DiffData, WorkMode, Citation, BuildStack } from '@/lib/types';
 import { INITIAL_DIFF_SAMPLE, SAMPLE_PYTHON_SCRIPT } from '@/lib/constants';
 import {
   getWebAppData,
@@ -49,6 +50,8 @@ import {
   getPreviewUrl,
   slugifyAppName,
   extractCodeFromMarkdown,
+  prepareHmrHtml,
+  sendHmrUpdateToWindow,
   DEFAULT_STARTER_WEBAPP_HTML,
   DEFAULT_WEBAPP_NAME,
   ACTIVE_APP_NAME_KEY,
@@ -79,37 +82,8 @@ interface CanvasDrawerProps {
   isFullWidth?: boolean;
   onToggleFullWidth?: () => void;
   isDragging?: boolean;
+  currentBuildStack?: BuildStack;
 }
-
-const DEFAULT_RESEARCH_CITATIONS: Citation[] = [
-  {
-    id: 'res-default-1',
-    sourceName: 'Nepal Rastra Bank (NRB)',
-    title: 'Payment Systems Indicators & Digital Retail Directives (2024/2025)',
-    url: 'https://nrb.org.np/payment-systems',
-    snippet:
-      'Official regulatory standards governing digital Payment Service Providers (PSP/PSO), cross-border QR interoperability (Nepal-India NPI/Fonepay), and real-time electronic transaction thresholds.',
-    reliabilityScore: 99,
-  },
-  {
-    id: 'res-default-2',
-    sourceName: 'ArXiv AI & Machine Learning Repository',
-    title: 'Test-Time Compute Scaling & Reasoning Verifiers in Modern Frontier LLMs',
-    url: 'https://arxiv.org/abs/2412.06769',
-    snippet:
-      'Empirical analysis of test-time search, chain-of-thought verification tokens, and outcome-supervised reward modeling for mathematical and multi-step algorithmic reasoning.',
-    reliabilityScore: 97,
-  },
-  {
-    id: 'res-default-3',
-    sourceName: 'TechPana & OnlineKhabar Tech',
-    title: 'Nepal National AI Landscape & Developer Ecosystem Benchmark',
-    url: 'https://techpana.com/nepal-ai-landscape',
-    snippet:
-      'Comprehensive benchmark of local software houses adopting open-weight foundation models (DeepSeek-V3, Llama-3.3) and regional NLP fine-tuning across Devanagari script.',
-    reliabilityScore: 94,
-  },
-];
 
 export default function CanvasDrawer({
   isOpen,
@@ -125,6 +99,7 @@ export default function CanvasDrawer({
   isFullWidth = false,
   onToggleFullWidth,
   isDragging = false,
+  currentBuildStack = 'html-css-js',
 }: CanvasDrawerProps) {
   const [activeTab, setActiveTab] = useState<CanvasTab>(() => {
     if (currentMode === 'developer') return 'preview';
@@ -280,7 +255,7 @@ export default function CanvasDrawer({
   };
 
   // Researcher Mode State
-  const displayCitations = citations.length > 0 ? citations : DEFAULT_RESEARCH_CITATIONS;
+  const displayCitations = citations || [];
   const [copiedCitationId, setCopiedCitationId] = useState<string | null>(null);
   const [copiedBrief, setCopiedBrief] = useState(false);
 
@@ -292,6 +267,15 @@ export default function CanvasDrawer({
   const [copiedScratchpad, setCopiedScratchpad] = useState(false);
 
   // Web App Preview State (Developer Mode)
+  const [activeAppStack, setActiveAppStack] = useState<BuildStack>(currentBuildStack || 'html-css-js');
+  const [copiedWebCode, setCopiedWebCode] = useState(false);
+
+  useEffect(() => {
+    if (currentBuildStack) {
+      setActiveAppStack(currentBuildStack);
+    }
+  }, [currentBuildStack]);
+
   const [webAppName, setWebAppName] = useState<string>(() => {
     if (typeof window !== 'undefined') {
       return localStorage.getItem(ACTIVE_APP_NAME_KEY) || DEFAULT_WEBAPP_NAME;
@@ -309,6 +293,11 @@ export default function CanvasDrawer({
   });
   const [previewViewport, setPreviewViewport] = useState<'desktop' | 'tablet' | 'mobile'>('desktop');
   const [previewIframeKey, setPreviewIframeKey] = useState(0);
+  const previewIframeRef = useRef<HTMLIFrameElement>(null);
+  const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
+  const [hmrStatus, setHmrStatus] = useState<'idle' | 'updating' | 'hot-updated'>('idle');
+  const [lastHmrTime, setLastHmrTime] = useState<Date | null>(null);
+
   const [copiedPreviewUrl, setCopiedPreviewUrl] = useState(false);
   const [showWebDomainModal, setShowWebDomainModal] = useState(false);
   const [webCustomDomain, setWebCustomDomain] = useState('');
@@ -323,43 +312,135 @@ export default function CanvasDrawer({
   });
   const [isEditingWebCode, setIsEditingWebCode] = useState(false);
 
-  // Listen to external storage/custom updates
-  useEffect(() => {
-    const handleStorage = (e: StorageEvent) => {
-      if (e.key === `alphanex_webapp_code_${slugifyAppName(webAppName)}` && e.newValue) {
-        setWebAppHtml(e.newValue);
-        setEditableWebHtml(e.newValue);
+  // Apply HMR without destroying the iframe element
+  const applyHotModuleReplacement = useCallback(
+    (newHtml: string, targetAppName?: string, forceReload?: boolean) => {
+      const slug = targetAppName ? slugifyAppName(targetAppName) : slugifyAppName(webAppName);
+      setWebAppHtml(newHtml);
+      setEditableWebHtml(newHtml);
+
+      if (forceReload) {
         setPreviewIframeKey((k) => k + 1);
+        setHmrStatus('hot-updated');
+        setLastHmrTime(new Date());
+        setTimeout(() => setHmrStatus('idle'), 2500);
+        return;
+      }
+
+      if (!autoRefreshEnabled) {
+        return;
+      }
+
+      setHmrStatus('updating');
+
+      // 1. First attempt: Direct postMessage to HMR runtime in iframe
+      let posted = false;
+      if (previewIframeRef.current?.contentWindow) {
+        posted = sendHmrUpdateToWindow(previewIframeRef.current.contentWindow, newHtml, slug);
+      }
+
+      // 2. Fallback if iframe is not yet responsive or cold: soft-update srcdoc without changing react key
+      const fallbackTimer = setTimeout(() => {
+        if (previewIframeRef.current) {
+          try {
+            previewIframeRef.current.srcdoc = prepareHmrHtml(newHtml);
+            setHmrStatus('hot-updated');
+            setLastHmrTime(new Date());
+          } catch {
+            setPreviewIframeKey((k) => k + 1);
+          }
+          setTimeout(() => setHmrStatus('idle'), 2500);
+        }
+      }, 500);
+
+      return () => clearTimeout(fallbackTimer);
+    },
+    [webAppName, autoRefreshEnabled]
+  );
+
+  // Listen for HMR Acknowledgement from inside iframe sandbox
+  useEffect(() => {
+    const handleHmrAck = (e: MessageEvent) => {
+      if (!e.data || typeof e.data !== 'object') return;
+      if (e.data.type === 'ALPHANEX_HMR_ACK') {
+        setHmrStatus('hot-updated');
+        setLastHmrTime(new Date());
+        setTimeout(() => setHmrStatus('idle'), 2500);
       }
     };
+    window.addEventListener('message', handleHmrAck);
+    return () => window.removeEventListener('message', handleHmrAck);
+  }, []);
+
+  // Listen to external storage/custom updates and BroadcastChannel
+  useEffect(() => {
+    const currentSlug = slugifyAppName(webAppName);
+
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key && e.key.startsWith('alphanex_webapp_code_') && e.newValue) {
+        const incomingSlug = e.key.replace('alphanex_webapp_code_', '');
+        if (incomingSlug === currentSlug || !webAppName || webAppName === DEFAULT_WEBAPP_NAME) {
+          if (incomingSlug !== currentSlug) {
+            setWebAppName(incomingSlug);
+            setAppNameDraft(incomingSlug);
+          }
+          applyHotModuleReplacement(e.newValue, incomingSlug);
+        }
+      }
+    };
+
     const handleCustom = (e: Event) => {
       const ce = e as CustomEvent;
-      if (ce.detail?.appName === slugifyAppName(webAppName) && ce.detail?.html) {
-        setWebAppHtml(ce.detail.html);
-        setEditableWebHtml(ce.detail.html);
-        setPreviewIframeKey((k) => k + 1);
+      const incomingSlug = ce.detail?.appName ? slugifyAppName(ce.detail.appName) : null;
+      const incomingHtml = ce.detail?.html;
+      if (ce.detail?.stack) {
+        setActiveAppStack(ce.detail.stack);
+      }
+      if (incomingHtml) {
+        if (incomingSlug && incomingSlug !== currentSlug) {
+          setWebAppName(incomingSlug);
+          setAppNameDraft(incomingSlug);
+        }
+        applyHotModuleReplacement(incomingHtml, incomingSlug || webAppName);
       }
     };
+
+    let bc: BroadcastChannel | null = null;
+    if (typeof BroadcastChannel !== 'undefined') {
+      try {
+        bc = new BroadcastChannel('alphanex_webapp_hmr');
+        bc.onmessage = (event) => {
+          if (event.data?.type === 'ALPHANEX_HMR_UPDATE' && event.data?.html) {
+            const incomingSlug = slugifyAppName(event.data.appName);
+            if (incomingSlug !== currentSlug) {
+              setWebAppName(incomingSlug);
+              setAppNameDraft(incomingSlug);
+            }
+            applyHotModuleReplacement(event.data.html, incomingSlug);
+          }
+        };
+      } catch {}
+    }
+
     window.addEventListener('storage', handleStorage);
     window.addEventListener('alphanex-webapp-updated', handleCustom);
     return () => {
       window.removeEventListener('storage', handleStorage);
       window.removeEventListener('alphanex-webapp-updated', handleCustom);
+      if (bc) bc.close();
     };
-  }, [webAppName]);
+  }, [webAppName, applyHotModuleReplacement]);
 
-  // Auto-detect code when assistant responds in developer mode
+  // Auto-detect code whenever assistant outputs or regenerates code in developer or any mode
   useEffect(() => {
-    if (currentMode === 'developer' && latestAssistantMessage) {
+    if (latestAssistantMessage) {
       const extracted = extractCodeFromMarkdown(latestAssistantMessage);
-      if (extracted && extracted.length > 40) {
+      if (extracted && extracted.length > 40 && extracted !== webAppHtml) {
         saveWebAppData(webAppName, extracted);
-        setWebAppHtml(extracted);
-        setEditableWebHtml(extracted);
-        setPreviewIframeKey((k) => k + 1);
+        applyHotModuleReplacement(extracted, webAppName);
       }
     }
-  }, [latestAssistantMessage, currentMode, webAppName]);
+  }, [latestAssistantMessage, webAppName, webAppHtml, applyHotModuleReplacement]);
 
   const cleanAppSlug = slugifyAppName(webAppName);
   const previewOrigin =
@@ -385,16 +466,13 @@ export default function CanvasDrawer({
 
   const handleSaveCustomWebCode = () => {
     saveWebAppData(webAppName, editableWebHtml);
-    setWebAppHtml(editableWebHtml);
-    setPreviewIframeKey((k) => k + 1);
+    applyHotModuleReplacement(editableWebHtml, webAppName);
     setIsEditingWebCode(false);
   };
 
   const handleResetWebStarter = () => {
     saveWebAppData(webAppName, DEFAULT_STARTER_WEBAPP_HTML);
-    setWebAppHtml(DEFAULT_STARTER_WEBAPP_HTML);
-    setEditableWebHtml(DEFAULT_STARTER_WEBAPP_HTML);
-    setPreviewIframeKey((k) => k + 1);
+    applyHotModuleReplacement(DEFAULT_STARTER_WEBAPP_HTML, webAppName, true);
     setIsEditingWebCode(false);
   };
 
@@ -481,24 +559,11 @@ captured
             }`
         );
       } else {
-        // High-fidelity fallback simulated execution
-        await new Promise((r) => setTimeout(r, 600));
         const elapsed = Math.round(performance.now() - startTime);
         setExecutionTime(elapsed);
-
-        // Analyze code to print simulated output
-        let simulatedOut = '';
-        if (pythonCode.includes('format_nepali_currency')) {
-          simulatedOut = `--- NEPAL FINTECH METRICS ---\nGross Revenue: NPR 14,58,920.50\nTax Provision: NPR 2,91,784.10\nNet Retained:  NPR 11,67,136.40\nStatus: All checks passed. Ready for eSewa / Khalti settlement batch.`;
-        } else if (pythonCode.includes('verify_esewa_signature')) {
-          simulatedOut = `eSewa v2 signature verified: True\nDigest: b'x7j3kLq...'\nResponse status: 200 OK (Webhook Accepted)`;
-        } else {
-          simulatedOut = `Executing ${pythonCode.split('\n').length} lines of Python code...\n[STDOUT] Process completed successfully (exit code 0).`;
-        }
-
         setTerminalOutput(
           (prev) =>
-            `${prev}\n>>> [Run @ ${new Date().toLocaleTimeString()}] (took ${elapsed}ms)\n${simulatedOut}\n`
+            `${prev}\n>>> [Pyodide Engine Not Loaded @ ${new Date().toLocaleTimeString()}]\nPython WASM runtime is not loaded in this session. Connect network or run execution via terminal/sandbox to inspect actual output.\n`
         );
       }
     } catch (err: any) {
@@ -549,11 +614,11 @@ captured
       } else {
         throw new Error(data.error || 'Failed to create PR');
       }
-    } catch {
-      const prNumber = Math.floor(100 + Math.random() * 900);
-      setCreatedPRUrl(`${repoUrl}/pull/${prNumber}`);
-      setPrStats({ additions: 18, deletions: 6, changedFiles: 1 });
-      setPrMessage(`Pull request #${prNumber} staged on branch 'fix/esewa-signature-verify'.`);
+    } catch (err: unknown) {
+      setCreatedPRUrl(null);
+      setPrStats(null);
+      const errMsg = err instanceof Error ? err.message : 'GitHub API request failed';
+      setPrMessage(`Unable to stage pull request: ${errMsg}. Configure a valid GITHUB_TOKEN in your environment or Settings.`);
     } finally {
       setIsPushingPR(false);
     }
@@ -1054,12 +1119,64 @@ captured
                 </button>
               </div>
 
-              {/* Refresh Sandbox */}
+              {/* HMR Auto-Refresh Toggle & Status Indicator */}
               <button
                 type="button"
-                onClick={() => setPreviewIframeKey((k) => k + 1)}
-                className="p-1.5 rounded-md hover:bg-[#EFECE6] text-[#736E67] hover:text-[#1F1E1D] transition-colors"
-                title="Reload Preview Sandbox"
+                id="webapp-canvas-hmr-toggle-btn"
+                onClick={() => setAutoRefreshEnabled(!autoRefreshEnabled)}
+                className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-semibold border transition-all cursor-pointer ${
+                  !autoRefreshEnabled
+                    ? 'bg-[#F0ECE4] text-[#888] border-[#D5D0C7] hover:bg-[#E5E2DC]'
+                    : hmrStatus === 'updating'
+                    ? 'bg-amber-50 text-amber-800 border-amber-300 shadow-xs'
+                    : hmrStatus === 'hot-updated'
+                    ? 'bg-emerald-50 text-emerald-800 border-emerald-300 shadow-xs'
+                    : 'bg-white text-emerald-700 border-emerald-300 hover:bg-emerald-50/50'
+                }`}
+                title={
+                  autoRefreshEnabled
+                    ? 'Auto-refresh & HMR are ON. AI generated updates hot-swap instantly into the sandbox without page reload. Click to pause.'
+                    : 'Auto-refresh is paused. Click to resume HMR.'
+                }
+              >
+                <Zap
+                  className={`w-3.5 h-3.5 ${
+                    !autoRefreshEnabled
+                      ? 'text-[#999]'
+                      : hmrStatus === 'updating'
+                      ? 'text-amber-600 animate-bounce'
+                      : 'text-emerald-600'
+                  }`}
+                />
+                <span className="hidden sm:inline">
+                  {!autoRefreshEnabled
+                    ? 'HMR Paused'
+                    : hmrStatus === 'updating'
+                    ? 'Hot Swapping...'
+                    : hmrStatus === 'hot-updated'
+                    ? 'Hot Updated'
+                    : 'HMR Active'}
+                </span>
+                {autoRefreshEnabled && (
+                  <span
+                    className={`w-1.5 h-1.5 rounded-full ${
+                      hmrStatus === 'updating'
+                        ? 'bg-amber-500 animate-ping'
+                        : hmrStatus === 'hot-updated'
+                        ? 'bg-emerald-500'
+                        : 'bg-emerald-500 animate-pulse'
+                    }`}
+                  />
+                )}
+              </button>
+
+              {/* Refresh / Hard Reload Sandbox */}
+              <button
+                type="button"
+                id="webapp-canvas-reload-btn"
+                onClick={() => applyHotModuleReplacement(webAppHtml, webAppName, true)}
+                className="p-1.5 rounded-md hover:bg-[#EFECE6] text-[#736E67] hover:text-[#1F1E1D] transition-colors cursor-pointer"
+                title="Hard reload preview sandbox"
               >
                 <RotateCcw className="w-3.5 h-3.5" />
               </button>
@@ -1136,23 +1253,91 @@ captured
           <div className="flex-1 flex overflow-hidden relative">
             {/* Interactive Sandbox Screen */}
             <div className="flex-1 flex items-center justify-center p-3 overflow-auto bg-[#EFEBE4]/60">
-              <div
-                className={`transition-all duration-200 overflow-hidden bg-white ${
-                  previewViewport === 'mobile'
-                    ? 'w-[375px] h-[667px] rounded-2xl shadow-2xl border-4 border-[#1F1E1D]'
-                    : previewViewport === 'tablet'
-                    ? 'w-[768px] h-[780px] rounded-xl shadow-2xl border-2 border-[#D5D0C7]'
-                    : 'w-full h-full rounded-md shadow-xs border border-[#E0DCD5]'
-                }`}
-              >
-                <iframe
-                  key={previewIframeKey}
-                  srcDoc={webAppHtml || DEFAULT_STARTER_WEBAPP_HTML}
-                  title={`Live Preview of ${cleanAppSlug}`}
-                  className="w-full h-full border-0 bg-white"
-                  sandbox="allow-scripts allow-forms allow-modals allow-same-origin allow-popups"
-                />
-              </div>
+              {activeAppStack === 'html-css-js' ? (
+                <div
+                  className={`transition-all duration-200 overflow-hidden bg-white ${
+                    previewViewport === 'mobile'
+                      ? 'w-[375px] h-[667px] rounded-2xl shadow-2xl border-4 border-[#1F1E1D]'
+                      : previewViewport === 'tablet'
+                      ? 'w-[768px] h-[780px] rounded-xl shadow-2xl border-2 border-[#D5D0C7]'
+                      : 'w-full h-full rounded-md shadow-xs border border-[#E0DCD5]'
+                  }`}
+                >
+                  <iframe
+                    ref={previewIframeRef}
+                    key={previewIframeKey}
+                    srcDoc={prepareHmrHtml(webAppHtml || DEFAULT_STARTER_WEBAPP_HTML)}
+                    title={`Live Preview of ${cleanAppSlug}`}
+                    className="w-full h-full border-0 bg-white"
+                    sandbox="allow-scripts allow-forms allow-modals allow-same-origin allow-popups"
+                  />
+                </div>
+              ) : (
+                <div className="w-full max-w-2xl bg-white rounded-xl border border-[#D5D0C7] shadow-sm p-5 space-y-4">
+                  <div className="flex items-center justify-between pb-3 border-b border-[#E5E2DC]">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-9 h-9 rounded-lg bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-700">
+                        <Code2 className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h3 className="text-sm font-bold text-[#1F1E1D] flex items-center gap-2">
+                          <span>{activeAppStack.toUpperCase()} Project Verified</span>
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 font-semibold">
+                            Syntax Validated
+                          </span>
+                        </h3>
+                        <p className="text-xs text-[#736E67]">
+                          Scaffold File:{' '}
+                          <code className="font-mono text-[#1F1E1D] font-semibold">
+                            {activeAppStack === 'flutter'
+                              ? 'lib/main.dart'
+                              : activeAppStack === 'vue'
+                              ? 'src/App.vue'
+                              : activeAppStack === 'nextjs'
+                              ? 'app/page.tsx'
+                              : 'src/App.tsx'}
+                          </code>
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard.writeText(webAppHtml);
+                        setCopiedWebCode(true);
+                        setTimeout(() => setCopiedWebCode(false), 2000);
+                      }}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-[#FAF8F5] border border-[#D5D0C7] hover:bg-[#EFECE6] text-[#1F1E1D] transition-colors cursor-pointer"
+                    >
+                      {copiedWebCode ? (
+                        <>
+                          <Check className="w-3.5 h-3.5 text-emerald-600" />
+                          <span>Copied</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3.5 h-3.5" />
+                          <span>Copy Source</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  <div className="p-3 bg-amber-50/90 border border-amber-200 rounded-lg text-xs text-amber-900 flex items-start gap-2.5">
+                    <ShieldCheck className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-semibold">Framework Runtime Notice</p>
+                      <p className="text-[11px] text-amber-800 mt-0.5 leading-relaxed">
+                        This is a <strong>{activeAppStack}</strong> project. Preview of this stack requires a framework dev server (e.g. Vite, Next.js bundler, Metro, or Flutter SDK); showing verified source code view instead.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg bg-[#1F1E1D] text-[#E0DCD5] p-4 max-h-96 overflow-auto font-mono text-xs leading-relaxed border border-[#33302C]">
+                    <pre className="whitespace-pre-wrap">{webAppHtml}</pre>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* In-Canvas Source Code Editor Drawer */}
@@ -1922,11 +2107,22 @@ captured
           </div>
 
           <div className="flex-1 overflow-y-auto p-4 space-y-3">
-            {displayCitations.map((citation, idx) => (
-              <div
-                key={citation.id || idx}
-                className="p-3.5 rounded-xl border border-[#E5E2DC] bg-white hover:border-[#D5D0C7] transition-all space-y-2 shadow-2xs"
-              >
+            {displayCitations.length === 0 ? (
+              <div className="p-8 text-center space-y-3 border border-dashed border-[#D5D0C7] rounded-xl bg-white/60">
+                <BookOpen className="w-8 h-8 text-[#999] mx-auto" />
+                <div className="space-y-1">
+                  <p className="text-xs font-semibold text-[#1F1E1D]">No Live Citations Recorded</p>
+                  <p className="text-[11px] text-[#736E67] max-w-sm mx-auto leading-relaxed">
+                    Live web sources and search grounding will appear here when querying a search-grounded model (e.g. Gemini with Grounding enabled or Perplexity Sonar).
+                  </p>
+                </div>
+              </div>
+            ) : (
+              displayCitations.map((citation, idx) => (
+                <div
+                  key={citation.id || idx}
+                  className="p-3.5 rounded-xl border border-[#E5E2DC] bg-white hover:border-[#D5D0C7] transition-all space-y-2 shadow-2xs"
+                >
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex items-center gap-1.5">
                     <span className="w-5 h-5 rounded-full bg-emerald-50 text-emerald-800 text-[11px] font-bold flex items-center justify-center border border-emerald-200">
@@ -1987,7 +2183,7 @@ captured
                   </button>
                 </div>
               </div>
-            ))}
+            )))}
           </div>
         </div>
       )}

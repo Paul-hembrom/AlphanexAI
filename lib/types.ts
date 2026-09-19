@@ -118,10 +118,15 @@ export interface DiffData {
   deletions?: number;
 }
 
+export type WebBuildStack = 'html-css-js' | 'react' | 'vue' | 'nextjs';
+export type MobileBuildStack = 'react-native' | 'flutter';
+export type BuildStack = WebBuildStack | MobileBuildStack;
+
 export interface WebappBuildData {
   appName: string;
   html: string;
   buildStatus: 'success' | 'building' | 'failed';
+  stack?: BuildStack;
   testsPassed?: number;
   testsTotal?: number;
   bugsFound?: number;

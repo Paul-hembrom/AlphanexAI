@@ -189,11 +189,16 @@ export default function PaymentModal({
               NPR
             </div>
             <div>
-              <h3 className="text-sm font-bold text-[#1F1E1D]">
-                Nepali Payment & Credit Top-Up
-              </h3>
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-bold text-[#1F1E1D]">
+                  Credit Top-Up
+                </h3>
+                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300">
+                  Payment Sandbox / Demo Mode
+                </span>
+              </div>
               <p className="text-[11px] text-[#736E67]">
-                Instant QR Checkout via eSewa & Khalti
+                Simulated QR & Wallet checkout for workspace credit testing
               </p>
             </div>
           </div>
@@ -208,6 +213,14 @@ export default function PaymentModal({
           </button>
         </div>
 
+        {/* Sandbox Notice Banner */}
+        <div className="px-5 py-2 bg-amber-50 border-b border-amber-200 text-xs text-amber-900 flex items-center gap-2">
+          <ShieldCheck className="w-4 h-4 text-amber-700 shrink-0" />
+          <span>
+            <strong>Sandbox Environment:</strong> Transactions are simulated for development and testing. No real banking credentials or live money are processed.
+          </span>
+        </div>
+
         {/* Successful Confirmation Receipt View */}
         {successReceipt ? (
           <div id="payment-success-screen" className="p-6 space-y-5 text-center my-auto">
@@ -216,9 +229,9 @@ export default function PaymentModal({
             </div>
 
             <div className="space-y-1">
-              <h4 className="text-xl font-bold text-[#1F1E1D]">Payment Verified!</h4>
+              <h4 className="text-xl font-bold text-[#1F1E1D]">Sandbox Payment Processed</h4>
               <p className="text-xs text-[#736E67]">
-                Your AI Festa Studio wallet has been credited immediately.
+                Simulated checkout verified — test credits added to your workspace wallet.
               </p>
             </div>
 

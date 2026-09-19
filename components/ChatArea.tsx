@@ -533,23 +533,48 @@ export default function ChatArea({
                     {message.webappBuild && (
                       <div
                         id={`webapp-build-card-${message.id}`}
-                        className="p-3.5 rounded-xl border border-emerald-300 bg-emerald-50/70 space-y-2.5 text-xs text-neutral-800"
+                        className={`p-3.5 rounded-xl border space-y-2.5 text-xs ${
+                          message.webappBuild.buildStatus === 'failed'
+                            ? 'border-red-300 bg-red-50/70 text-red-950'
+                            : 'border-emerald-300 bg-emerald-50/70 text-neutral-800'
+                        }`}
                       >
                         <div className="flex items-center justify-between gap-2 flex-wrap">
-                          <div className="flex items-center gap-2">
-                            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
-                            <span className="font-bold text-emerald-950">
-                              Sandbox Compiled: {message.webappBuild.appName}
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span
+                              className={`w-2.5 h-2.5 rounded-full ${
+                                message.webappBuild.buildStatus === 'failed'
+                                  ? 'bg-red-500'
+                                  : 'bg-emerald-500 animate-pulse'
+                              }`}
+                            />
+                            <span className="font-bold">
+                              {message.webappBuild.buildStatus === 'failed'
+                                ? `Build Failed: ${message.webappBuild.appName}`
+                                : `Compiled: ${message.webappBuild.appName}`}
                             </span>
-                            <span className="px-2 py-0.5 rounded-full bg-emerald-200/80 text-emerald-800 font-semibold text-[10px]">
-                              {message.webappBuild.testsPassed}/{message.webappBuild.testsTotal} Tests Passed
-                            </span>
-                            <span className="px-2 py-0.5 rounded-full bg-neutral-200/80 text-neutral-800 font-semibold text-[10px]">
-                              {message.webappBuild.bugsFound} Bugs
-                            </span>
+
+                            {message.webappBuild.stack && (
+                              <span className="px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-900 font-semibold text-[10px] uppercase">
+                                {message.webappBuild.stack}
+                              </span>
+                            )}
+
+                            {typeof message.webappBuild.testsPassed === 'number' &&
+                              typeof message.webappBuild.testsTotal === 'number' && (
+                                <span className="px-2 py-0.5 rounded-full bg-emerald-200/80 text-emerald-800 font-semibold text-[10px]">
+                                  {message.webappBuild.testsPassed}/{message.webappBuild.testsTotal} Tests Passed
+                                </span>
+                              )}
+
+                            {typeof message.webappBuild.bugsFound === 'number' && (
+                              <span className="px-2 py-0.5 rounded-full bg-neutral-200/80 text-neutral-800 font-semibold text-[10px]">
+                                {message.webappBuild.bugsFound} Bugs Detected
+                              </span>
+                            )}
                           </div>
 
-                          {onOpenWebPreview && (
+                          {onOpenWebPreview && message.webappBuild.buildStatus !== 'failed' && (
                             <button
                               type="button"
                               onClick={() => onOpenWebPreview(message.webappBuild?.appName)}
@@ -564,7 +589,12 @@ export default function ChatArea({
                         {message.webappBuild.verificationLog && message.webappBuild.verificationLog.length > 0 && (
                           <div className="bg-neutral-900 text-emerald-400 font-mono text-[11px] p-2.5 rounded-lg space-y-1">
                             {message.webappBuild.verificationLog.map((log, idx) => (
-                              <div key={idx}>{log}</div>
+                              <div
+                                key={idx}
+                                className={log.includes('FAIL') || log.includes('error') ? 'text-red-400' : ''}
+                              >
+                                {log}
+                              </div>
                             ))}
                           </div>
                         )}

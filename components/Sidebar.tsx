@@ -27,13 +27,18 @@ import {
   FileText,
   FileCode,
   ExternalLink,
+  Layers,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
-import { UserProfileSettings, UserWallet, WorkMode, ChatThread } from '@/lib/types';
+import { UserProfileSettings, UserWallet, WorkMode, ChatThread, BuildStack } from '@/lib/types';
 import {
   slugifyAppName,
   DEFAULT_WEBAPP_NAME,
   ACTIVE_APP_NAME_KEY,
+  getStoredBuildStack,
 } from '@/lib/webapp-preview';
+import BuildStackSelector, { BUILD_STACK_OPTIONS } from './BuildStackSelector';
 
 interface SidebarProps {
   isOpen: boolean;
@@ -145,6 +150,24 @@ export default function Sidebar({
     }
     return DEFAULT_WEBAPP_NAME;
   });
+
+  const [activeBuildStack, setActiveBuildStack] = useState<BuildStack>(() => {
+    return getStoredBuildStack();
+  });
+  const [isStackSelectorOpen, setIsStackSelectorOpen] = useState(false);
+
+  useEffect(() => {
+    const handleStackChanged = (event: Event) => {
+      const ce = event as CustomEvent<{ stack: BuildStack }>;
+      if (ce.detail?.stack) {
+        setActiveBuildStack(ce.detail.stack);
+      }
+    };
+    window.addEventListener('alphanex-build-stack-changed', handleStackChanged);
+    return () => {
+      window.removeEventListener('alphanex-build-stack-changed', handleStackChanged);
+    };
+  }, []);
 
   useEffect(() => {
     const handleStorage = (e: StorageEvent) => {
@@ -709,6 +732,57 @@ export default function Sidebar({
                 <ExternalLink className="w-3.5 h-3.5 text-amber-400" />
                 <span>Open in New Tab</span>
               </a>
+            </div>
+          )}
+
+          {/* Developer Mode: Build Stack Selector Collapsible Section */}
+          {currentMode === 'developer' && (
+            <div
+              id="sidebar-build-stack-container"
+              className="p-2.5 rounded-xl bg-white border border-[#E5E2DC] shadow-2xs space-y-2"
+            >
+              <button
+                id="sidebar-toggle-build-stack-btn"
+                type="button"
+                onClick={() => setIsStackSelectorOpen((prev) => !prev)}
+                className="w-full flex items-center justify-between text-left cursor-pointer group"
+                aria-label="Toggle Build Stack Selection"
+              >
+                <div className="flex items-center gap-1.5">
+                  <div className="w-5 h-5 rounded-md bg-neutral-900 text-white flex items-center justify-center font-bold text-xs shadow-xs">
+                    <Layers className="w-3 h-3 text-amber-400" />
+                  </div>
+                  <div>
+                    <span className="text-xs font-bold text-[#1F1E1D] block leading-none">
+                      Build Stack
+                    </span>
+                    <span className="text-[10px] text-[#736E67]">
+                      {BUILD_STACK_OPTIONS.find((s) => s.id === activeBuildStack)?.label || 'HTML / CSS / JS'}
+                    </span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1">
+                  <span className="text-[9px] px-1.5 py-0.2 rounded font-semibold bg-neutral-100 text-[#55504A]">
+                    {activeBuildStack === 'react-native' || activeBuildStack === 'flutter'
+                      ? 'Mobile'
+                      : 'Web'}
+                  </span>
+                  {isStackSelectorOpen ? (
+                    <ChevronUp className="w-3.5 h-3.5 text-[#736E67]" />
+                  ) : (
+                    <ChevronDown className="w-3.5 h-3.5 text-[#736E67]" />
+                  )}
+                </div>
+              </button>
+
+              {isStackSelectorOpen && (
+                <div className="pt-2 border-t border-[#EAE6DF] animate-in fade-in duration-150">
+                  <BuildStackSelector
+                    currentStack={activeBuildStack}
+                    onChangeStack={(stack) => setActiveBuildStack(stack)}
+                  />
+                </div>
+              )}
             </div>
           )}
         </div>

@@ -19,6 +19,7 @@ import {
   Settings,
   Home,
   Link2,
+  Terminal,
 } from 'lucide-react';
 import { WorkMode, ModelInfo, ReasoningEffort, UserWallet, ModelTier, UserProfileSettings } from '@/lib/types';
 import ModelSelector from './ModelSelector';
@@ -37,6 +38,9 @@ interface HeaderProps {
   onToggleParameterDrawer: () => void;
   isCanvasOpen: boolean;
   onToggleCanvas: () => void;
+  isTerminalOpen?: boolean;
+  onToggleTerminal?: () => void;
+  terminalErrorCount?: number;
   activeMobileTab: 'chat' | 'canvas';
   onChangeMobileTab: (tab: 'chat' | 'canvas') => void;
   isSidebarOpen?: boolean;
@@ -59,6 +63,9 @@ export default function Header({
   onToggleParameterDrawer,
   isCanvasOpen,
   onToggleCanvas,
+  isTerminalOpen,
+  onToggleTerminal,
+  terminalErrorCount,
   activeMobileTab,
   onChangeMobileTab,
   isSidebarOpen,
@@ -299,6 +306,52 @@ export default function Header({
               }`}
             />
           </button>
+
+          {/* Terminal Output Panel Toggle */}
+          {onToggleTerminal && (
+            <button
+              id="header-toggle-terminal-btn"
+              type="button"
+              onClick={onToggleTerminal}
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-medium transition-all cursor-pointer ${
+                isTerminalOpen
+                  ? 'bg-[#1F1E1D] text-white border-[#1F1E1D] shadow-xs'
+                  : terminalErrorCount && terminalErrorCount > 0
+                  ? 'bg-red-50 text-red-800 border-red-300 hover:bg-red-100 shadow-xs'
+                  : 'bg-[#FBF9F5] hover:bg-[#F3EFEA] text-[#55504A] hover:text-[#1F1E1D] border-[#E5E2DC]'
+              }`}
+              title={
+                isTerminalOpen
+                  ? 'Hide Web App Terminal Output'
+                  : terminalErrorCount && terminalErrorCount > 0
+                  ? `${terminalErrorCount} runtime errors in terminal. Click to open.`
+                  : 'Open Web App Terminal Output & Logs'
+              }
+              aria-label="Toggle Terminal Panel"
+            >
+              <Terminal
+                className={`w-4 h-4 ${
+                  isTerminalOpen
+                    ? 'text-emerald-400'
+                    : terminalErrorCount && terminalErrorCount > 0
+                    ? 'text-red-600'
+                    : 'text-[#736E67]'
+                }`}
+              />
+              <span className="hidden sm:inline font-semibold">Terminal</span>
+              {terminalErrorCount && terminalErrorCount > 0 ? (
+                <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-red-600 text-white leading-none">
+                  {terminalErrorCount}
+                </span>
+              ) : (
+                <span
+                  className={`w-1.5 h-1.5 rounded-full ${
+                    isTerminalOpen ? 'bg-emerald-400' : 'bg-emerald-500/70'
+                  }`}
+                />
+              )}
+            </button>
+          )}
 
           {/* Settings Trigger Button (Claude-style Cmd+,) */}
           {onOpenSettings && (

@@ -22,6 +22,8 @@ export async function POST(
     history = [],
     params = {},
     reasoningEffort = 'Medium',
+    buildStack = 'html-css-js',
+    userSettings,
   } = body;
 
   const encoder = new TextEncoder();
@@ -34,11 +36,8 @@ export async function POST(
       };
 
       try {
-        // Priority 0: Autonomous Studio Build & Sandbox Compiler (Google AI Studio Build Loop)
-        // When user asks to build an application, compile, test, verify bugs, and execute in sandbox
+        // Autonomous Studio Build & Sandbox Compiler (Real LLM Generation & Verification Loop)
         if (isAppBuildRequest(prompt)) {
-          const buildResult = buildApplicationFromPrompt(prompt, modelId);
-
           sendEvent({
             type: 'routing',
             modelId,
@@ -47,45 +46,46 @@ export async function POST(
             reasoningEffort,
           });
 
-          const thinkingSteps = [
-            `Analyzing application architecture, layout tree, and design tokens for ${buildResult.appName}...`,
-            `Compiling self-contained HTML5 bundle, Tailwind design system, and reactive client engine...`,
-            `Executing automated test suite: 4 unit & interaction tests passed in web sandbox runner...`,
-            `Bug Scanner: 0 syntax or runtime issues detected. Application verified and sandbox ready.`,
-          ];
-
-          for (const step of thinkingSteps) {
-            sendEvent({ type: 'thinking', content: step });
-            await new Promise((r) => setTimeout(r, 160));
-          }
+          const buildResult = await buildApplicationFromPrompt({
+            prompt,
+            modelId,
+            stack: buildStack,
+            settings: userSettings,
+            onThinking: (thought) => sendEvent({ type: 'thinking', content: thought }),
+          });
 
           const words = buildResult.summaryMarkdown.split(' ');
           for (let i = 0; i < words.length; i += 4) {
             const chunk = words.slice(i, i + 4).join(' ') + ' ';
             sendEvent({ type: 'content', content: chunk });
-            await new Promise((r) => setTimeout(r, 20));
+            await new Promise((r) => setTimeout(r, 15));
           }
 
           sendEvent({
             type: 'webapp_build',
             appName: buildResult.appName,
             html: buildResult.html,
-            buildStatus: 'success',
+            stack: buildResult.stack,
+            buildStatus: buildResult.buildStatus,
             testsPassed: buildResult.testsPassed,
             testsTotal: buildResult.testsTotal,
             bugsFound: buildResult.bugsFound,
             features: buildResult.features,
             verificationLog: buildResult.verificationLog,
             rawCodeRequested: buildResult.rawCodeRequested,
+            attemptsMade: buildResult.attemptsMade,
           });
+
+          const promptTokensEst = Math.round(prompt.length / 4);
+          const completionTokensEst = Math.round((buildResult.html?.length || 500) / 4);
 
           sendEvent({
             type: 'done',
             tokensUsed: {
-              promptTokens: 420,
-              completionTokens: 860,
-              totalTokens: 1280,
-              estimatedCostCredits: 0,
+              promptTokens: promptTokensEst,
+              completionTokens: completionTokensEst,
+              totalTokens: promptTokensEst + completionTokensEst,
+              estimatedCostCredits: mode === 'developer' ? 2 : 1,
             },
           });
 
@@ -298,35 +298,19 @@ async function simulateStreamingResponse(
   sendEvent({
     type: 'routing',
     modelId,
-    targetModel: `local-engine (${modelId})`,
-    provider: 'Local Resilient Engine',
+    targetModel: `offline-fallback (${modelId})`,
+    provider: 'Offline Fallback Engine',
     reasoningEffort,
   });
 
   // Thinking phase
-  const thinkingNotes = [
-    `Analyzing user query within ${mode.toUpperCase()} framework on ${modelId}...`,
-    `Evaluating architectural tradeoffs & querying MCP connectors (GitHub, Google Docs, Gmail)...`,
-    `Allocating ${reasoningEffort} test-time research budget (${
-      reasoningEffort === 'Low'
-        ? '~2,048 tokens (1x baseline)'
-        : reasoningEffort === 'Medium'
-        ? '~8,192 tokens (2x multiplier ⚠️)'
-        : reasoningEffort === 'High'
-        ? '~8,192 tokens (4x multiplier ⚠️)'
-        : reasoningEffort === 'Extra'
-        ? '~10,240 tokens (6x multiplier ⚠️ - increased research capacity)'
-        : '~12,288 tokens (10x multiplier 🚨 - exhaustive sandbox audit dossier)'
-    })...`,
-    `Synthesizing response with high precision, verified grounding citations, and MCP tool results...`,
-  ];
+  sendEvent({
+    type: 'thinking',
+    content: `[Offline Fallback] No frontier API key available for ${modelId}. Providing local template response.`,
+  });
+  await new Promise((r) => setTimeout(r, 200));
 
-  for (const note of thinkingNotes) {
-    sendEvent({ type: 'thinking', content: note });
-    await new Promise((r) => setTimeout(r, 220));
-  }
-
-  let fullResponse = '';
+  let fullResponse = '> ⚠️ **Offline Fallback Notice**: Live model streaming requires an active `OPENROUTER_API_KEY` or `GEMINI_API_KEY`. Below is an offline developer reference.\n\n';
   let citations: Citation[] | undefined = undefined;
   let diffData: DiffData | undefined = undefined;
 
@@ -476,48 +460,13 @@ class ResilientWorker:
       };
     }
   } else if (mode === 'researcher') {
-    citations = [
-      {
-        id: 'cite-1',
-        sourceName: 'OnlineKhabar Tech',
-        title: 'Nepal National AI Policy Draft: Strategic Pillars & Governance',
-        url: 'https://english.onlinekhabar.com/ai-policy-nepal.html',
-        snippet: 'The Ministry of Communication and Information Technology (MoCIT) formed a specialized task force to draft Nepal’s comprehensive artificial intelligence roadmap, focusing on indigenous datasets and sovereign computing.',
-        reliabilityScore: 94,
-      },
-      {
-        id: 'cite-2',
-        sourceName: 'Nepal Rastra Bank (NRB)',
-        title: 'Payment Systems Indicators Report 2025/26',
-        url: 'https://nrb.org.np/payment-systems',
-        snippet: 'Digital wallet volume crossed NPR 3.4 Trillion in annual turnover, with interoperable QR codes (Fonepay, NepalPay) driving over 72% of retail micro-transactions across urban and peri-urban hubs.',
-        reliabilityScore: 98,
-      },
-      {
-        id: 'cite-3',
-        sourceName: 'ArXiv Computer Science',
-        title: 'Low-Resource Multilingual NLP: Benchmarking Devanagari LLMs',
-        url: 'https://arxiv.org/abs/2403.11892',
-        snippet: 'Evaluating tokenizer compression ratios and zero-shot reasoning capabilities across South Asian languages reveals marked gains when fine-tuning Llama and Qwen models on curated Nepali corpuses.',
-        reliabilityScore: 96,
-      },
-      {
-        id: 'cite-4',
-        sourceName: 'NREN Research Bulletin',
-        title: 'High-Performance Research Computing Infrastructure in Nepal',
-        url: 'https://nren.net.np/research-computing',
-        snippet: 'Nepal Research and Education Network (NREN) connects academic nodes across Tribhuvan University and Kathmandu University to high-speed optical testbeds for climatic and genomic simulation workloads.',
-        reliabilityScore: 91,
-      },
-    ];
+    citations = undefined;
 
-    fullResponse = `### Comprehensive Research Synthesis & Strategic Landscape
+    fullResponse = `> ⚠️ **Offline Fallback**: Live web search grounding requires an active Gemini or Perplexity connection. Citations are omitted in offline mode.
 
-Based on verified research telemetry, government publications, and peer-reviewed studies, here is an executive briefing on the requested domain in Nepal:
+### Research Reference: Technology & AI Development
 
-#### 1. Regulatory & Policy Trajectory
-- **National AI Roadmap**: The Ministry of Communication and Information Technology (**MoCIT**) draft strategy delineates five foundational pillars: *Ethical AI Governance*, *Data Sovereignty & Local Datacenters*, *STEM & Workforce Upskilling*, *Public Sector Digitalization*, and *Cross-Border Cloud Compliance*.
-- **Data Protection & Privacy**: Nepal’s Individual Privacy Act (2075 / 2018) is undergoing legislative amendments to formalize explicit protocols regarding biometric data pipelines and algorithmic accountability.
+When live grounding is enabled, verified sources, academic papers, and government bulletins are queried in real time. Configure \`GEMINI_API_KEY\` or an OpenRouter key with Perplexity Sonar in Settings to enable real-time search grounding with live verified citations.
 
 #### 2. Digital Infrastructure & National Payment Rails
 - **Interoperability**: Real-time retail payments have experienced exponential growth, underpinned by the **National Payment Switch (NPS)** and retail QR interoperability (**NepalPay / Fonepay**).
@@ -526,10 +475,7 @@ Based on verified research telemetry, government publications, and peer-reviewed
 
 #### 3. Academic & Frontier AI Initiatives
 - **Devanagari NLP**: Academic consortiums at Kathmandu University (KU) and Pulchowk Campus (IOE) have published notable benchmarks for Nepali tokenization efficiency, overcoming classic unicode split errors.
-- **Climate & Glacial Telemetry**: High-altitude remote sensing models deployed in partnership with ICIMOD utilize open satellite constellations (Sentinel-2, Landsat-9) to predict GLOF vulnerabilities in the Dudh Koshi and Rolwaling valleys.
-
----
-*Note: Click on any of the source citation chips pinned above for direct access to the underlying institutional reports and peer-reviewed publications.*`;
+- **Climate & Glacial Telemetry**: High-altitude remote sensing models deployed in partnership with ICIMOD utilize open satellite constellations (Sentinel-2, Landsat-9) to predict GLOF vulnerabilities in the Dudh Koshi and Rolwaling valleys.`;
   } else {
     // General Mode
     fullResponse = `### Structured Synthesis & Strategic Roadmap

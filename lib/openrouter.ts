@@ -411,3 +411,69 @@ export async function streamOpenRouter(options: StreamOpenRouterOptions): Promis
     },
   });
 }
+
+export interface OpenRouterCompletionOptions {
+  apiKey?: string | null;
+  modelId?: string;
+  messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
+  temperature?: number;
+  maxTokens?: number;
+}
+
+/**
+ * Non-streaming LLM call via OpenRouter or Gemini fallback
+ */
+export async function callOpenRouterCompletion(
+  options: OpenRouterCompletionOptions
+): Promise<string> {
+  const apiKey = options.apiKey || getOpenRouterApiKey();
+  const rawModel = options.modelId || 'poolside/laguna-s-2.1:free';
+  const targetModel = MODEL_TO_OPENROUTER_MAP[rawModel] || rawModel;
+
+  if (apiKey) {
+    try {
+      const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': 'https://aistudio.google.com',
+          'X-Title': 'Alphanex AI Studio Build',
+        },
+        body: JSON.stringify({
+          model: targetModel,
+          messages: options.messages,
+          temperature: options.temperature ?? 0.2,
+          max_tokens: options.maxTokens ?? 8192,
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const content = data.choices?.[0]?.message?.content;
+        if (typeof content === 'string' && content.length > 0) {
+          return content;
+        }
+      }
+    } catch (err) {
+      console.warn('OpenRouter completion error, attempting Gemini fallback:', err);
+    }
+  }
+
+  // Fallback: Gemini API if key is present
+  const geminiKey = process.env.GEMINI_API_KEY;
+  if (geminiKey && geminiKey !== 'MY_GEMINI_API_KEY') {
+    const { GoogleGenAI } = await import('@google/genai');
+    const ai = new GoogleGenAI({ apiKey: geminiKey });
+    const promptText = options.messages.map((m) => `${m.role.toUpperCase()}: ${m.content}`).join('\n\n');
+    const res = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: promptText,
+    });
+    if (res.text) return res.text;
+  }
+
+  throw new Error(
+    'No valid API key configured. Please configure OPENROUTER_API_KEY or GEMINI_API_KEY to generate code with real frontier models.'
+  );
+}

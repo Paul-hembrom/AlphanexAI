@@ -14,8 +14,9 @@ import {
   Cpu,
   Layers,
 } from 'lucide-react';
-import { WorkspaceParams, WorkMode, ModelInfo } from '@/lib/types';
+import { WorkspaceParams, WorkMode, ModelInfo, BuildStack } from '@/lib/types';
 import { DEFAULT_SYSTEM_INSTRUCTIONS } from '@/lib/constants';
+import BuildStackSelector from './BuildStackSelector';
 
 interface ParameterDrawerProps {
   isOpen: boolean;
@@ -24,6 +25,8 @@ interface ParameterDrawerProps {
   onChangeParams: (params: WorkspaceParams) => void;
   currentMode: WorkMode;
   selectedModel: ModelInfo;
+  buildStack?: BuildStack;
+  onChangeBuildStack?: (stack: BuildStack) => void;
 }
 
 export default function ParameterDrawer({
@@ -33,6 +36,8 @@ export default function ParameterDrawer({
   onChangeParams,
   currentMode,
   selectedModel,
+  buildStack,
+  onChangeBuildStack,
 }: ParameterDrawerProps) {
   const [isSysInstOpen, setIsSysInstOpen] = useState(true);
 
@@ -103,6 +108,23 @@ export default function ParameterDrawer({
             {selectedModel.provider}
           </span>
         </div>
+
+        {/* Target Build Stack (Developer Mode) */}
+        {currentMode === 'developer' && (
+          <div className="p-3 rounded-xl border border-[#E5E2DC] bg-[#FAF8F3] space-y-2">
+            <div className="flex items-center gap-1.5 font-bold text-[#1F1E1D]">
+              <Layers className="w-3.5 h-3.5 text-amber-600" />
+              <span>Target Build Stack</span>
+            </div>
+            <p className="text-[11px] text-[#736E67]">
+              Choose whether to compile a Web application (HTML/CSS/JS, React, Vue, Next.js) or Mobile app source files (React Native, Flutter).
+            </p>
+            <BuildStackSelector
+              currentStack={buildStack}
+              onChangeStack={onChangeBuildStack}
+            />
+          </div>
+        )}
 
         {/* System Instructions Accordion */}
         <div className="rounded-xl border border-[#E5E2DC] bg-[#FAF8F3] overflow-hidden">

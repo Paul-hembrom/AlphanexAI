@@ -10,20 +10,35 @@
  *    dumping raw code blocks, UNLESS the user explicitly requested code.
  */
 
-import { slugifyAppName } from './webapp-preview';
-import { WebappBuildData } from './types';
+import { slugifyAppName, extractCodeFromMarkdown, ensureCompleteHtml } from './webapp-preview';
+import { BuildStack, UserProfileSettings, WebappBuildData } from './types';
+import { callOpenRouterCompletion, getOpenRouterApiKey } from './openrouter';
+import { runBuildCheckInSandbox } from './vercel-sandbox';
+
+export interface BuildOptions {
+  prompt: string;
+  modelId?: string;
+  stack?: BuildStack;
+  settings?: UserProfileSettings;
+  openRouterApiKey?: string | null;
+  onThinking?: (thought: string) => void;
+  signal?: AbortSignal;
+}
 
 export interface BuildResult {
   appName: string;
   appTitle: string;
   html: string;
-  testsPassed: number;
-  testsTotal: number;
-  bugsFound: number;
+  stack: BuildStack;
+  testsPassed?: number;
+  testsTotal?: number;
+  bugsFound?: number;
+  buildStatus: 'success' | 'failed';
   features: string[];
   verificationLog: string[];
   summaryMarkdown: string;
   rawCodeRequested: boolean;
+  attemptsMade: number;
 }
 
 /**
@@ -768,83 +783,259 @@ export function generateEcommerceAppHtml(): string {
  * Builds the complete application, runs verification tests & bug detection,
  * and compiles the response matching Google AI Studio Build standards.
  */
-export function buildApplicationFromPrompt(prompt: string, modelId: string = 'poolside/laguna-s-2.1:free'): BuildResult {
-  const p = prompt.toLowerCase();
+export async function buildApplicationFromPrompt(
+  promptOrOptions: string | BuildOptions,
+  modelIdArg?: string,
+  stackArg?: BuildStack,
+  settingsArg?: UserProfileSettings,
+  onThinkingArg?: (thought: string) => void
+): Promise<BuildResult> {
+  const options: BuildOptions =
+    typeof promptOrOptions === 'string'
+      ? {
+          prompt: promptOrOptions,
+          modelId: modelIdArg,
+          stack: stackArg,
+          settings: settingsArg,
+          onThinking: onThinkingArg,
+        }
+      : promptOrOptions;
+
+  const prompt = options.prompt || '';
+  const modelId = options.modelId || 'poolside/laguna-s-2.1:free';
+  const stack: BuildStack = options.stack || 'html-css-js';
   const rawCodeRequested = isCodeExplicitlyRequested(prompt);
+  const appName = slugifyAppName(prompt.slice(0, 30)) || 'web-application';
+  const appTitle = prompt.length > 50 ? `${prompt.slice(0, 50)}...` : prompt;
 
-  let appName = 'ecommerce-webapp';
-  let appTitle = 'Nexus Market | Modern E-Commerce Platform';
-  let html = '';
-  let features: string[] = [];
+  options.onThinking?.(`Analyzing requirements for ${appName} using stack [${stack}]...`);
 
-  if (p.includes('ecommerce') || p.includes('e-commerce') || p.includes('store') || p.includes('shop')) {
-    appName = 'ecommerce-webapp';
-    appTitle = 'Nexus Market | Modern E-Commerce Platform';
-    html = generateEcommerceAppHtml();
-    features = [
-      'Interactive Product Catalog with High-Res Visuals & Badge Tags',
-      'Instant Category Filtering (Electronics, Wearables, Footwear, Accessories)',
-      'Real-Time Live Search Input with Instant Grid Updates',
-      'Slide-Over Shopping Cart Drawer with Quantity Math & Total Calculations',
-      'Checkout Modal with Local eSewa, Khalti, Card & COD Payment Options',
-      'Dual Currency Selector: USD ($) & NPR (Rs.) with Dynamic Price Formats',
-      'Pure Client-Side Isolated Sandbox with Real-Time Toast Notifications',
-    ];
-  } else {
-    // General or custom app
-    appName = slugifyAppName(prompt.slice(0, 30)) || 'web-application';
-    appTitle = 'Alphanex Interactive Web Application';
-    html = generateEcommerceAppHtml(); // Rich default sandbox
-    features = [
-      'Responsive Clean Layout with Modern Utility Styling',
-      'Isolated Client-Side Runtime Sandbox',
-      'Automated DOM Event Listeners & State Dispatch',
-      'Mobile, Tablet & Desktop Viewport Responsive Breakpoints',
-    ];
+  let filename = 'index.html';
+  let stackInstruction = '';
+
+  if (stack === 'html-css-js') {
+    filename = 'index.html';
+    stackInstruction = `You MUST provide a single, complete, fully working HTML document.
+- Start with <!DOCTYPE html>.
+- Include <head> with Tailwind CSS CDN: <script src="https://cdn.tailwindcss.com"></script> and modern fonts.
+- Implement responsive, polished semantic markup with accessible styling.
+- Provide full, working Vanilla JavaScript inside a <script> tag for every interactive feature (buttons, filters, search, modal dialogs, calculators).
+- NEVER use pseudo-code, empty handler stubs, or TODO comments. Write real, executable JS with zero syntax errors.
+- Wrap the entire code in a single markdown code block: \`\`\`html ... \`\`\`.`;
+  } else if (stack === 'react' || stack === 'nextjs') {
+    filename = stack === 'react' ? 'App.tsx' : 'page.tsx';
+    stackInstruction = `You MUST provide a complete, self-contained, working React application/component using Tailwind CSS.
+- Include all necessary React hooks (useState, useEffect, useMemo, etc.).
+- Provide full UI interactions with clean functional components.
+- Wrap the entire code in a single markdown code block: \`\`\`tsx ... \`\`\`.`;
+  } else if (stack === 'vue') {
+    filename = 'App.vue';
+    stackInstruction = `You MUST provide a complete Vue 3 Single File Component.
+- Include <template>, <script setup>, and <style> sections.
+- Use Tailwind CSS utility classes for styling.
+- Wrap the entire code in a single markdown code block: \`\`\`vue ... \`\`\`.`;
+  } else if (stack === 'react-native') {
+    filename = 'App.tsx';
+    stackInstruction = `You MUST provide a complete React Native / Expo screen component in TypeScript.
+- Import components from 'react-native'.
+- Include StyleSheet or inline styles.
+- Wrap the entire code in a single markdown code block: \`\`\`tsx ... \`\`\`.`;
+  } else if (stack === 'flutter') {
+    filename = 'main.dart';
+    stackInstruction = `You MUST provide a complete Flutter application in Dart.
+- Include import 'package:flutter/material.dart';
+- Include void main() => runApp(...) and a complete StatefulWidget or StatelessWidget.
+- Wrap the entire code in a single markdown code block: \`\`\`dart ... \`\`\`.`;
   }
 
-  // Verification & Synthetic Test Suite (like Google AI Studio Compiler)
-  const verificationLog = [
-    '✓ Scaffold Check: Validated HTML5 doctype, viewport meta, and UTF-8 charset.',
-    '✓ Bundle Compile: Loaded Tailwind CSS CDN and Plus Jakarta Sans typography.',
-    '✓ Component Hierarchy: Verified navigation header, product catalog grid, cart drawer, and checkout dialog.',
-    '✓ State Engine: Verified cart dispatch routines, quantity increment/decrement math, and VAT tax calculation.',
-    '✓ Bug Scanner: 0 syntax errors, 0 runtime exceptions detected. All 4 unit & interaction tests passed.',
+  const systemPrompt = `You are a Principal Software Architect and Application Engineer at Google AI Studio.
+Build a complete, production-ready application based on the user's prompt.
+Target Stack: ${stack}
+
+${stackInstruction}
+
+Design Requirements:
+- Use clean modern design tokens, high contrast, balanced whitespace, and purposeful layout.
+- Include complete business logic for the requested domain.
+- Provide a brief 2-3 sentence overview at the beginning, followed by the complete code block.`;
+
+  const conversationHistory: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: prompt },
   ];
 
-  const testsPassed = 4;
-  const testsTotal = 4;
-  const bugsFound = 0;
+  let currentCode = '';
+  let finalCheckResult = {
+    exitCode: 0,
+    stdout: '',
+    stderr: '',
+    passed: true,
+    checksRun: 0,
+    checksPassed: 0,
+    verificationLog: [] as string[],
+  };
 
-  // Build the Google AI Studio style summary markdown
-  let summaryMarkdown = `### ${appTitle}
+  let attemptsMade = 0;
+  const maxAttempts = 3;
 
-I have compiled, verified, and deployed your application directly into your dedicated workspace web sandbox using **${modelId}**.
+  const hasKey = !!(
+    options.openRouterApiKey ||
+    getOpenRouterApiKey() ||
+    (process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'MY_GEMINI_API_KEY')
+  );
 
-#### ⚡ Verification & Test Results
-- **Compiler Status**: \`Build Succeeded (0.24s)\`
-- **Automated Test Suite**: \`${testsPassed}/${testsTotal} Tests Passed\` (DOM mount, cart state dispatch, modal lifecycle, responsive layout)
-- **Bug Scanner**: \`${bugsFound} Syntax or Runtime Bugs Detected\`
+  if (!hasKey) {
+    options.onThinking?.('No frontier API key detected. Verifying local starter scaffold in sandbox...');
+    currentCode =
+      stack === 'html-css-js'
+        ? generateEcommerceAppHtml()
+        : `// Verified scaffold for ${stack}\nexport default function App() {\n  return <div>Scaffold Ready</div>;\n}`;
+    finalCheckResult = await runBuildCheckInSandbox(
+      [{ path: filename, content: currentCode }],
+      stack,
+      options.settings
+    );
+    attemptsMade = 1;
+  } else {
+    // Real LLM Generation & Auto Bug-Fix Loop
+    while (attemptsMade < maxAttempts) {
+      attemptsMade++;
+      options.onThinking?.(
+        attemptsMade === 1
+          ? `Invoking frontier model ${modelId} to generate ${stack} code bundle...`
+          : `Bug-fix iteration #${attemptsMade}: Requesting model to fix syntax error...`
+      );
 
-#### 📦 Key Implemented Capabilities
-${features.map((f) => `- **${f.split(' with ')[0]}**: ${f}`).join('\n')}
+      let modelResponse = '';
+      try {
+        modelResponse = await callOpenRouterCompletion({
+          apiKey: options.openRouterApiKey,
+          modelId,
+          messages: conversationHistory,
+          temperature: attemptsMade === 1 ? 0.2 : 0.1,
+          maxTokens: 8192,
+        });
+      } catch (err: unknown) {
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        finalCheckResult = {
+          exitCode: 1,
+          stdout: '',
+          stderr: `LLM Generation Failed: ${errorMsg}`,
+          passed: false,
+          checksRun: 1,
+          checksPassed: 0,
+          verificationLog: [`✗ LLM Generation Error: ${errorMsg}`],
+        };
+        break;
+      }
 
-> **Live Sandbox Active:** The interactive web preview has been compiled and is running in the **Web Preview** sandbox on the right. You can test product selection, live search, cart calculations, and payment simulations directly!`;
+      // Extract code from response
+      if (stack === 'html-css-js') {
+        const extracted = extractCodeFromMarkdown(modelResponse);
+        currentCode = extracted ? ensureCompleteHtml(extracted) : ensureCompleteHtml(modelResponse);
+      } else {
+        const codeBlockRegex = /```(?:tsx|jsx|typescript|javascript|vue|dart)?\s*([\s\S]*?)```/i;
+        const match = modelResponse.match(codeBlockRegex);
+        currentCode = match && match[1] ? match[1].trim() : modelResponse;
+      }
 
-  if (rawCodeRequested) {
-    summaryMarkdown += `\n\n#### Source Code\n\`\`\`html\n${html}\n\`\`\``;
+      options.onThinking?.(`Running sandbox compilation check on generated ${filename}...`);
+
+      const check = await runBuildCheckInSandbox(
+        [{ path: filename, content: currentCode }],
+        stack,
+        options.settings
+      );
+      finalCheckResult = check;
+
+      if (check.passed) {
+        options.onThinking?.(`✓ Sandbox compilation succeeded with zero syntax errors.`);
+        break;
+      }
+
+      options.onThinking?.(`⚠️ Sandbox detected syntax error: ${check.stderr}. Initiating auto-fix...`);
+      conversationHistory.push({ role: 'assistant', content: modelResponse });
+      conversationHistory.push({
+        role: 'user',
+        content: `The generated code failed compilation with this exact error:\n${check.stderr}\n\nPlease fix this error and return the complete, corrected code bundle inside a single markdown code block.`,
+      });
+    }
+  }
+
+  const buildStatus: 'success' | 'failed' = finalCheckResult.passed ? 'success' : 'failed';
+  const features: string[] = [
+    `Target Stack: ${stack}`,
+    `Sandbox Compiler Engine: ${options.settings?.codeExecutionEngine || 'cloud_sandbox'}`,
+    `Compiled Bundle: ${filename} (${currentCode.length} bytes)`,
+    attemptsMade > 1
+      ? `Auto Bug-Fix Loop: ${attemptsMade} attempts to resolve compilation issues`
+      : `Scaffold: Compiled on first attempt without syntax errors`,
+  ];
+
+  if (options.settings?.autoGeneratePrOnBugFix && attemptsMade > 1) {
+    features.push('Auto-Fix PR: Automated patch record queued for sandbox changes.');
+  }
+
+  let summaryMarkdown = '';
+  if (finalCheckResult.passed) {
+    summaryMarkdown = `### ${appTitle}
+
+Your application has been generated, compiled, and verified in the **${stack}** sandbox using **${modelId}**.
+
+#### ⚡ Real Sandbox Compilation Results
+- **Status**: \`Build Succeeded (${attemptsMade} attempt${attemptsMade > 1 ? 's' : ''})\`
+- **Compiler Checks**: \`${finalCheckResult.checksPassed}/${finalCheckResult.checksRun} passed\`
+- **Syntax Exceptions**: \`0 bugs detected\`
+- **Stack**: \`${stack}\`
+
+#### 📦 Verified Architecture
+${features.map((f) => `- ${f}`).join('\n')}
+
+${
+  stack === 'html-css-js'
+    ? '> **Live Preview Active:** The application is running in the interactive Web Preview sandbox on the right.'
+    : '> **Source Ready:** Source code has been compiled and verified for mobile/framework export.'
+}
+
+${
+  !hasKey
+    ? '\n\n> ⚠️ *Note: No OPENROUTER_API_KEY or GEMINI_API_KEY was configured in the environment. A local verified starter scaffold was compiled. Configure your API key in settings for custom frontier generation.*'
+    : ''
+}`;
+  } else {
+    summaryMarkdown = `### ⚠️ Compilation Warning: ${appTitle}
+
+The sandbox compiler encountered an error during verification after ${attemptsMade} attempts.
+
+#### ⚡ Compiler Diagnostics
+- **Status**: \`Build Failed\`
+- **Checks Passed**: \`${finalCheckResult.checksPassed}/${finalCheckResult.checksRun}\`
+- **Last Compiler Error**:
+\`\`\`
+${finalCheckResult.stderr}
+\`\`\`
+
+You can inspect the code below and adjust your prompt or fix the syntax directly in the editor.`;
+  }
+
+  if (rawCodeRequested || !finalCheckResult.passed) {
+    const lang = stack === 'flutter' ? 'dart' : stack === 'vue' ? 'vue' : stack === 'html-css-js' ? 'html' : 'tsx';
+    summaryMarkdown += `\n\n#### Source Code (${filename})\n\`\`\`${lang}\n${currentCode}\n\`\`\``;
   }
 
   return {
     appName,
     appTitle,
-    html,
-    testsPassed,
-    testsTotal,
-    bugsFound,
+    html: currentCode,
+    stack,
+    testsPassed: finalCheckResult.checksPassed,
+    testsTotal: finalCheckResult.checksRun,
+    bugsFound: finalCheckResult.passed ? 0 : 1,
+    buildStatus,
     features,
-    verificationLog,
+    verificationLog: finalCheckResult.verificationLog,
     summaryMarkdown,
     rawCodeRequested,
+    attemptsMade,
   };
 }
