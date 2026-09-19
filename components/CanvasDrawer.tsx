@@ -147,6 +147,17 @@ export default function CanvasDrawer({
     }
   }, [currentMode]);
 
+  // Listen for programmatic tab switch events (e.g. when app build completes)
+  useEffect(() => {
+    const handleSwitchTab = (e: any) => {
+      if (e.detail?.tab) {
+        setActiveTab(e.detail.tab);
+      }
+    };
+    window.addEventListener('alphanex-switch-canvas-tab', handleSwitchTab);
+    return () => window.removeEventListener('alphanex-switch-canvas-tab', handleSwitchTab);
+  }, []);
+
   // Tab 1: Diff Viewer State
   const currentDiff = propDiffData || INITIAL_DIFF_SAMPLE;
   const [acceptedFix, setAcceptedFix] = useState(false);

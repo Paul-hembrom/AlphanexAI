@@ -46,6 +46,20 @@ export const AVAILABLE_MODELS: ModelInfo[] = [
     differentiators: 'Native multimodal vision-language (VL) model; fast visual document parsing, UI & chart recognition, and zero-cost reasoning.',
     description: 'Native multimodal vision-language (VL) model; fast visual document parsing, UI & chart recognition, and zero-cost reasoning.',
   },
+  {
+    id: 'poolside/laguna-s-2.1:free',
+    name: 'Poolside Laguna S 2.1',
+    tier: 'free',
+    provider: 'Poolside AI',
+    contextWindow: '128k tokens',
+    supportsThinking: true,
+    costPerQueryCredits: 0,
+    badge: 'Agentic Studio Builder',
+    inputPrice: '$0.00',
+    outputPrice: '$0.00',
+    differentiators: 'Autonomous agentic builder model; compiles, tests, verifies, and executes web sandboxes with zero-cost reasoning.',
+    description: 'Autonomous agentic builder model; compiles, tests, verifies, and executes web sandboxes with zero-cost reasoning.',
+  },
 
   // ==========================================
   // TIER: LITE (3 Models)
@@ -275,6 +289,11 @@ export const INITIAL_WORKSPACE_PARAMS: WorkspaceParams = {
 
 export const SAMPLE_PROMPTS_BY_MODE: Record<WorkMode, { title: string; prompt: string; description: string }[]> = {
   developer: [
+    {
+      title: 'Build a Basic E-Commerce Webapp',
+      prompt: 'Build a basic ecommerce webapp or website with an interactive product catalog, shopping bag drawer, search filter, and checkout modal.',
+      description: 'Studio compiler, automated tests & live sandbox preview',
+    },
     {
       title: 'Fix eSewa Payment Callback Signature Verification',
       prompt: 'Review and fix this FastAPI eSewa v2 signature verification code where HMAC-SHA256 hash mismatch is failing the payment callback verification.',

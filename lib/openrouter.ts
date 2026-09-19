@@ -29,6 +29,7 @@ export const MODEL_TO_OPENROUTER_MAP: Record<string, string> = {
   'qwen-3-8-flash': 'qwen/qwen-2.5-72b-instruct',
   'deepseek-v4-flash': 'deepseek/deepseek-chat',
   'inclusionai/ling-3.0-flash-vl:free': 'inclusionai/ling-3.0-flash-vl:free',
+  'poolside/laguna-s-2.1:free': 'poolside/laguna-s-2.1:free',
 
   // Lite tier
   'laguna-s-2-1': 'mistralai/mistral-large-2407',

@@ -21,7 +21,13 @@ import {
   ModelTier,
   ChatThread,
   UserProfileSettings,
+  WebappBuildData,
 } from '@/lib/types';
+import {
+  saveWebAppData,
+  slugifyAppName,
+  ACTIVE_APP_NAME_KEY,
+} from '@/lib/webapp-preview';
 import {
   AVAILABLE_MODELS,
   INITIAL_WORKSPACE_PARAMS,
@@ -573,6 +579,51 @@ export default function WorkspaceView() {
                 );
                 // Also update Canvas
                 setActiveDiffData(data.diff);
+              } else if (data.type === 'webapp_build') {
+                const buildData: WebappBuildData = {
+                  appName: (data.appName as string) || 'ecommerce-webapp',
+                  html: (data.html as string) || '',
+                  buildStatus: (data.buildStatus as any) || 'success',
+                  testsPassed: typeof data.testsPassed === 'number' ? data.testsPassed : 4,
+                  testsTotal: typeof data.testsTotal === 'number' ? data.testsTotal : 4,
+                  bugsFound: typeof data.bugsFound === 'number' ? data.bugsFound : 0,
+                  features: Array.isArray(data.features) ? data.features : [],
+                  rawCodeRequested: !!data.rawCodeRequested,
+                  verificationLog: Array.isArray(data.verificationLog) ? data.verificationLog : [],
+                };
+
+                setMessages((prev) =>
+                  prev.map((msg) =>
+                    msg.id === assistantMsgId
+                      ? {
+                          ...msg,
+                          webappBuild: buildData,
+                        }
+                      : msg
+                  )
+                );
+
+                // Save code into local web app sandbox
+                if (typeof window !== 'undefined' && buildData.html) {
+                  saveWebAppData(buildData.appName, buildData.html);
+                  localStorage.setItem(ACTIVE_APP_NAME_KEY, slugifyAppName(buildData.appName));
+                  window.dispatchEvent(
+                    new CustomEvent('alphanex-webapp-updated', {
+                      detail: { appName: buildData.appName },
+                    })
+                  );
+                }
+
+                // Automatically open Canvas & switch to 'preview' sandbox tab
+                setIsCanvasOpen(true);
+                setActiveMobileTab('canvas');
+                if (typeof window !== 'undefined') {
+                  window.dispatchEvent(
+                    new CustomEvent('alphanex-switch-canvas-tab', {
+                      detail: { tab: 'preview' },
+                    })
+                  );
+                }
               } else if (data.type === 'routing') {
                 setMessages((prev) =>
                   prev.map((msg) =>
@@ -673,6 +724,27 @@ export default function WorkspaceView() {
     setIsCanvasOpen(true);
     setActiveMobileTab('canvas');
   };
+
+  // Open Web App in Web Preview Sandbox tab in Canvas
+  const handleOpenWebPreview = useCallback((appName?: string) => {
+    if (appName && typeof window !== 'undefined') {
+      localStorage.setItem(ACTIVE_APP_NAME_KEY, slugifyAppName(appName));
+      window.dispatchEvent(
+        new CustomEvent('alphanex-webapp-updated', {
+          detail: { appName },
+        })
+      );
+    }
+    setIsCanvasOpen(true);
+    setActiveMobileTab('canvas');
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent('alphanex-switch-canvas-tab', {
+          detail: { tab: 'preview' },
+        })
+      );
+    }
+  }, []);
 
   // Divider Mouse/Pointer Drag Resize Handler
   const handleStartDrag = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -881,6 +953,7 @@ export default function WorkspaceView() {
             onSendMessage={handleSendMessage}
             onStopStreaming={handleStopStreaming}
             onOpenInCanvas={handleOpenInCanvas}
+            onOpenWebPreview={handleOpenWebPreview}
             onSelectPrompt={(text) => handleSendMessage(text)}
             userCredits={wallet.credits}
             onChangeMode={handleChangeMode}

@@ -118,6 +118,18 @@ export interface DiffData {
   deletions?: number;
 }
 
+export interface WebappBuildData {
+  appName: string;
+  html: string;
+  buildStatus: 'success' | 'building' | 'failed';
+  testsPassed?: number;
+  testsTotal?: number;
+  bugsFound?: number;
+  features?: string[];
+  rawCodeRequested?: boolean;
+  verificationLog?: string[];
+}
+
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant' | 'system';
@@ -129,6 +141,7 @@ export interface ChatMessage {
   providerName?: string;
   citations?: Citation[];
   diffData?: DiffData;
+  webappBuild?: WebappBuildData;
   isThinking?: boolean;
   thinkingContent?: string;
   reasoningEffort?: ReasoningEffort;
