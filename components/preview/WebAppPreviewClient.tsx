@@ -18,6 +18,9 @@ import {
   Sparkles,
   Code2,
   Zap,
+  UploadCloud,
+  Loader2,
+  AlertCircle,
 } from 'lucide-react';
 import {
   getWebAppData,
@@ -47,7 +50,21 @@ export default function WebAppPreviewClient({ appName }: WebAppPreviewClientProp
   const [copiedLink, setCopiedLink] = useState<boolean>(false);
   const [showDomainModal, setShowDomainModal] = useState<boolean>(false);
   const [customDomainInput, setCustomDomainInput] = useState<string>('');
-  const [domainSaved, setDomainSaved] = useState<boolean>(false);
+  const [isAttachingDomain, setIsAttachingDomain] = useState<boolean>(false);
+  const [domainStatus, setDomainStatus] = useState<{
+    configured?: boolean;
+    verification?: Array<{ type: string; domain: string; value: string; reason?: string }>;
+    domain?: string;
+  } | null>(null);
+  const [domainError, setDomainError] = useState<string | null>(null);
+
+  // Deployment state
+  const [isDeploying, setIsDeploying] = useState<boolean>(false);
+  const [deployedUrl, setDeployedUrl] = useState<string | null>(null);
+  const [deployError, setDeployError] = useState<string | null>(null);
+  const [showDeployModal, setShowDeployModal] = useState<boolean>(false);
+  const [copiedDeployUrl, setCopiedDeployUrl] = useState<boolean>(false);
+
   const [showSourceCode, setShowSourceCode] = useState<boolean>(false);
   const [isEditingCode, setIsEditingCode] = useState<boolean>(false);
   const [editableCode, setEditableCode] = useState<string>(() => getWebAppData(cleanAppName).html);
@@ -161,6 +178,81 @@ export default function WebAppPreviewClient({ appName }: WebAppPreviewClientProp
       navigator.clipboard.writeText(previewUrl);
       setCopiedLink(true);
       setTimeout(() => setCopiedLink(false), 2000);
+    }
+  };
+
+  const handleCopyDeployUrl = () => {
+    if (deployedUrl && typeof navigator !== 'undefined' && navigator.clipboard) {
+      navigator.clipboard.writeText(deployedUrl);
+      setCopiedDeployUrl(true);
+      setTimeout(() => setCopiedDeployUrl(false), 2000);
+    }
+  };
+
+  const handleDeploy = async () => {
+    setIsDeploying(true);
+    setDeployError(null);
+    setShowDeployModal(true);
+
+    try {
+      const currentCode = htmlCode || getWebAppData(cleanAppName).html || DEFAULT_STARTER_WEBAPP_HTML;
+      const res = await fetch('/api/deploy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          appName: cleanAppName,
+          html: currentCode,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        setDeployError(data.error || 'Deployment failed. Check VERCEL_TOKEN configuration in Settings.');
+      } else {
+        setDeployedUrl(data.url);
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setDeployError(`Network error during deployment: ${msg}`);
+    } finally {
+      setIsDeploying(false);
+    }
+  };
+
+  const handleAttachDomain = async () => {
+    const trimmed = customDomainInput.trim();
+    if (!trimmed) return;
+
+    setIsAttachingDomain(true);
+    setDomainError(null);
+    setDomainStatus(null);
+
+    try {
+      const res = await fetch('/api/deploy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'domain',
+          appName: cleanAppName,
+          domain: trimmed,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        setDomainError(data.error || 'Failed to attach domain.');
+      } else {
+        setDomainStatus({
+          domain: data.domain,
+          verification: data.verification,
+          configured: data.configured,
+        });
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setDomainError(`Domain configuration network error: ${msg}`);
+    } finally {
+      setIsAttachingDomain(false);
     }
   };
 
@@ -345,10 +437,26 @@ export default function WebAppPreviewClient({ appName }: WebAppPreviewClientProp
             type="button"
             onClick={() => setShowDomainModal(true)}
             className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-white border border-[#D5D0C7] text-[#55504A] hover:text-[#1F1E1D] hover:bg-[#FAF8F5] transition-colors cursor-pointer"
-            title="Custom Domain & Android Build Settings"
+            title="Custom Domain & Host Configuration"
           >
             <Globe className="w-3.5 h-3.5 text-indigo-600" />
             <span className="hidden sm:inline">Domain & Host</span>
+          </button>
+
+          {/* Real Deploy to Vercel Button */}
+          <button
+            type="button"
+            onClick={handleDeploy}
+            disabled={isDeploying}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white transition-colors cursor-pointer shadow-xs disabled:opacity-60"
+            title="Deploy live to a public URL via Vercel"
+          >
+            {isDeploying ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <UploadCloud className="w-3.5 h-3.5" />
+            )}
+            <span>{isDeploying ? 'Deploying...' : 'Deploy'}</span>
           </button>
 
           {/* Copy URL Link */}
@@ -517,39 +625,79 @@ export default function WebAppPreviewClient({ appName }: WebAppPreviewClientProp
                   value={customDomainInput}
                   onChange={(e) => {
                     setCustomDomainInput(e.target.value);
-                    setDomainSaved(false);
+                    setDomainError(null);
                   }}
                   placeholder="yourbrand.com or app.yourbrand.com"
                   className="flex-1 px-3 py-2 text-xs rounded-xl border border-[#D5D0C7] focus:outline-hidden focus:ring-2 focus:ring-[#1F1E1D]/20 focus:border-[#1F1E1D]"
                 />
                 <button
                   type="button"
-                  onClick={() => {
-                    if (customDomainInput.trim()) {
-                      setDomainSaved(true);
-                    }
-                  }}
-                  className="px-4 py-2 text-xs font-bold rounded-xl bg-[#1F1E1D] text-white hover:bg-[#33302C] transition-colors cursor-pointer"
+                  onClick={handleAttachDomain}
+                  disabled={isAttachingDomain || !customDomainInput.trim()}
+                  className="px-4 py-2 text-xs font-bold rounded-xl bg-[#1F1E1D] text-white hover:bg-[#33302C] transition-colors cursor-pointer disabled:opacity-50 flex items-center gap-1.5"
                 >
-                  Save Config
+                  {isAttachingDomain && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                  <span>{isAttachingDomain ? 'Attaching...' : 'Attach Domain'}</span>
                 </button>
               </div>
-              {domainSaved && (
-                <div className="p-2.5 rounded-lg bg-emerald-50 border border-emerald-200 text-xs text-emerald-800 flex items-center gap-2">
-                  <Check className="w-4 h-4 text-emerald-600 shrink-0" />
-                  <span>Domain <span className="font-mono font-bold">{customDomainInput}</span> staged! Point your CNAME record to <code className="font-mono font-bold">cname.alphanexai.vercel.app</code>.</span>
+
+              {domainError && (
+                <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-800 flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                  <div>
+                    <strong className="block font-semibold">Domain Configuration Notice:</strong>
+                    <span>{domainError}</span>
+                  </div>
                 </div>
               )}
+
+              {domainStatus && (
+                <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-900 space-y-2">
+                  <div className="flex items-center gap-2 font-bold text-emerald-800">
+                    <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <span>Domain <code className="font-mono">{domainStatus.domain}</code> attached via Vercel!</span>
+                  </div>
+                  {domainStatus.configured ? (
+                    <p className="text-[11px] text-emerald-700">
+                      Domain is active and successfully pointing to your deployment.
+                    </p>
+                  ) : (
+                    <div className="text-[11px] space-y-1">
+                      <p className="font-medium text-emerald-800">
+                        Add the following DNS record at your domain registrar:
+                      </p>
+                      {domainStatus.verification && domainStatus.verification.length > 0 ? (
+                        <div className="font-mono bg-white/80 p-2 rounded border border-emerald-300 text-[10px] space-y-1">
+                          {domainStatus.verification.map((v, i) => (
+                            <div key={i} className="flex justify-between">
+                              <span className="font-semibold">{v.type}: {v.domain}</span>
+                              <span className="text-neutral-700">{v.value}</span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="font-mono bg-white/80 p-2 rounded border border-emerald-300 text-[10px]">
+                          CNAME {domainStatus.domain} &rarr; cname.vercel-dns.com
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <p className="text-[11px] text-[#736E67] leading-relaxed">
+                Requires an active deployment and <code className="font-mono bg-neutral-200/60 px-1 rounded">VERCEL_TOKEN</code> configured. Click <strong>Deploy</strong> on the top bar before linking a domain.
+              </p>
             </div>
 
             {/* Android App Compatible Roadmap Info */}
             <div className="p-3.5 rounded-xl bg-amber-50/70 border border-amber-200/80 space-y-1">
               <div className="flex items-center gap-1.5 text-xs font-bold text-amber-900">
                 <Sparkles className="w-3.5 h-3.5 text-amber-600" />
-                <span>Upcoming Features: Android App & Full Direct Hosting</span>
+                <span>Mobile Export Roadmap: Android & iOS Bundling</span>
               </div>
               <p className="text-[11px] text-amber-800 leading-relaxed">
-                As per platform roadmap, direct DNS automation and 1-click Android APK bundling (Capacitor/PWA bridge) will let you download an installable Android build directly from this panel.
+                Native APK bundling (Capacitor/PWA bridge) will let you download an installable Android build directly from this workspace.
               </p>
             </div>
 
@@ -557,6 +705,117 @@ export default function WebAppPreviewClient({ appName }: WebAppPreviewClientProp
               <button
                 type="button"
                 onClick={() => setShowDomainModal(false)}
+                className="px-4 py-2 text-xs font-bold rounded-xl bg-[#FAF8F5] border border-[#D5D0C7] text-[#1F1E1D] hover:bg-[#EFECE6] transition-colors cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Real Vercel Deployment Modal */}
+      {showDeployModal && (
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl border border-[#DDD8CF] shadow-2xl max-w-md w-full p-6 space-y-5 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-start justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-indigo-50 border border-indigo-200 flex items-center justify-center text-indigo-600">
+                  <UploadCloud className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-[#1F1E1D]">Deploy to Public Web</h3>
+                  <p className="text-xs text-[#736E67]">Ship a live production instance via Vercel</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowDeployModal(false)}
+                className="p-1.5 rounded-lg text-[#736E67] hover:bg-[#FAF8F5] hover:text-[#1F1E1D] transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* In Flight Loading State */}
+            {isDeploying && (
+              <div className="p-5 rounded-xl bg-[#FAF8F5] border border-[#E5E2DC] flex flex-col items-center justify-center text-center space-y-3">
+                <Loader2 className="w-7 h-7 text-indigo-600 animate-spin" />
+                <div className="space-y-1">
+                  <div className="text-xs font-bold text-[#1F1E1D]">Creating Live Vercel Deployment...</div>
+                  <p className="text-[11px] text-[#736E67] max-w-xs">
+                    Packing source bundles and dispatching to Vercel Deployments REST API. This typically takes 2–5 seconds.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Success State with Real Live URL */}
+            {!isDeploying && deployedUrl && (
+              <div className="space-y-3">
+                <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 space-y-2">
+                  <div className="flex items-center gap-2 text-xs font-bold text-emerald-900">
+                    <Check className="w-4 h-4 text-emerald-600" />
+                    <span>Live Deployment Ready!</span>
+                  </div>
+                  <p className="text-[11px] text-emerald-800 leading-relaxed">
+                    Your web application is globally distributed and running on Vercel edge infrastructure.
+                  </p>
+                  <div className="flex items-center justify-between gap-2 p-2 bg-white rounded-lg border border-emerald-300">
+                    <span className="font-mono text-xs text-indigo-700 font-semibold truncate select-all">
+                      {deployedUrl}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleCopyDeployUrl}
+                      className="px-2.5 py-1 rounded-md text-[11px] font-bold bg-neutral-100 hover:bg-neutral-200 text-neutral-800 transition-colors shrink-0"
+                    >
+                      {copiedDeployUrl ? 'Copied' : 'Copy'}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex gap-2">
+                  <a
+                    href={deployedUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex-1 flex items-center justify-center gap-1.5 py-2.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition-colors cursor-pointer shadow-xs"
+                  >
+                    <span>Open Live Site</span>
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </a>
+                </div>
+              </div>
+            )}
+
+            {/* Error State */}
+            {!isDeploying && deployError && (
+              <div className="space-y-3">
+                <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 space-y-2">
+                  <div className="flex items-center gap-2 text-xs font-bold text-rose-900">
+                    <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                    <span>Deployment Verification Failed</span>
+                  </div>
+                  <p className="text-xs text-rose-800 leading-relaxed">
+                    {deployError}
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleDeploy}
+                  className="w-full py-2.5 px-4 rounded-xl bg-[#1F1E1D] hover:bg-[#33302C] text-white text-xs font-bold transition-colors cursor-pointer"
+                >
+                  Try Again
+                </button>
+              </div>
+            )}
+
+            <div className="flex items-center justify-end pt-2 border-t border-[#E5E2DC]">
+              <button
+                type="button"
+                onClick={() => setShowDeployModal(false)}
                 className="px-4 py-2 text-xs font-bold rounded-xl bg-[#FAF8F5] border border-[#D5D0C7] text-[#1F1E1D] hover:bg-[#EFECE6] transition-colors cursor-pointer"
               >
                 Close

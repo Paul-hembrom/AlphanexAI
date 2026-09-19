@@ -74,6 +74,7 @@ export async function POST(
             verificationLog: buildResult.verificationLog,
             rawCodeRequested: buildResult.rawCodeRequested,
             attemptsMade: buildResult.attemptsMade,
+            repairIterations: buildResult.repairIterations,
           });
 
           const promptTokensEst = Math.round(prompt.length / 4);

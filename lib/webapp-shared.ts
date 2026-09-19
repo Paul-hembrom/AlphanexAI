@@ -5,6 +5,8 @@
  * Contains NO window or localStorage dependencies.
  */
 
+import type { BuildStack } from './types';
+
 export const DEFAULT_WEBAPP_NAME = 'your-app-name';
 export const WEBAPP_STORAGE_PREFIX = 'alphanex_webapp_code_';
 export const ACTIVE_APP_NAME_KEY = 'alphanex_active_app_name';
@@ -220,3 +222,379 @@ export function ensureCompleteHtml(snippet: string): string {
 </body>
 </html>`;
 }
+
+/**
+ * Wraps generated framework code (React, Next.js, Vue) into a standalone,
+ * live-renderable HTML document utilizing CDN scripts (React/ReactDOM/Babel, Vue 3 runtime).
+ */
+export function wrapGeneratedCodeAsPreviewHtml(code: string, stack: BuildStack): string {
+  if (!code || !code.trim()) return '';
+
+  if (stack === 'html-css-js') {
+    return ensureCompleteHtml(code);
+  }
+
+  if (stack === 'react') {
+    return wrapReactPreviewHtml(code, false);
+  }
+
+  if (stack === 'nextjs') {
+    return wrapReactPreviewHtml(code, true);
+  }
+
+  if (stack === 'vue') {
+    return wrapVuePreviewHtml(code);
+  }
+
+  // Mobile stacks: react-native & flutter remain raw source
+  return code;
+}
+
+function wrapReactPreviewHtml(code: string, isNextJs: boolean): string {
+  // 1. Strip client/server directives
+  let transformed = code.replace(/['"]use (?:client|server)['"];?/g, '');
+
+  // 2. Identify default component export name
+  let componentName = 'App';
+  const defaultFuncMatch = transformed.match(/export\s+default\s+function\s+([A-Za-z0-9_]+)/);
+  const defaultClassMatch = transformed.match(/export\s+default\s+class\s+([A-Za-z0-9_]+)/);
+  const defaultVarMatch = transformed.match(/export\s+default\s+([A-Za-z0-9_]+)\s*;?/);
+
+  if (defaultFuncMatch && defaultFuncMatch[1]) {
+    componentName = defaultFuncMatch[1];
+    transformed = transformed.replace(/export\s+default\s+function\s+([A-Za-z0-9_]+)/, 'function $1');
+  } else if (defaultClassMatch && defaultClassMatch[1]) {
+    componentName = defaultClassMatch[1];
+    transformed = transformed.replace(/export\s+default\s+class\s+([A-Za-z0-9_]+)/, 'class $1');
+  } else if (defaultVarMatch && defaultVarMatch[1]) {
+    componentName = defaultVarMatch[1];
+    transformed = transformed.replace(/export\s+default\s+[A-Za-z0-9_]+\s*;?/, '');
+  } else if (/export\s+default\s+function\s*\(/.test(transformed)) {
+    componentName = 'AppPreview';
+    transformed = transformed.replace(/export\s+default\s+function\s*\(/, 'function AppPreview(');
+  } else if (/export\s+default\s+/.test(transformed)) {
+    componentName = 'AppPreview';
+    transformed = transformed.replace(/export\s+default\s+/, 'const AppPreview = ');
+  } else {
+    // If no default export, look for first uppercase identifier
+    const fnMatch = transformed.match(/(?:function|const)\s+([A-Z][A-Za-z0-9_]*)/);
+    if (fnMatch && fnMatch[1]) {
+      componentName = fnMatch[1];
+    }
+  }
+
+  // 3. Strip remaining export keywords
+  transformed = transformed.replace(/export\s+(?:async\s+)?function\s+/g, 'function ');
+  transformed = transformed.replace(/export\s+(?:const|let|var)\s+/g, 'const ');
+  transformed = transformed.replace(/export\s*\{[^}]*\};?/g, '');
+
+  // 4. Handle lucide-react imports: extract icon names
+  const lucideIcons = new Set<string>();
+  transformed = transformed.replace(/import\s*\{([^}]+)\}\s*from\s*['"]lucide-react['"];?/g, (_, names) => {
+    names.split(',').forEach((n: string) => {
+      const trimmed = n.trim().split(/\s+as\s+/)[0].trim();
+      if (trimmed && /^[A-Za-z0-9_]+$/.test(trimmed)) lucideIcons.add(trimmed);
+    });
+    return '';
+  });
+
+  // 5. Strip module imports not resolvable in standalone browser
+  transformed = transformed.replace(/import\s+React.*?from\s+['"]react['"];?/g, '');
+  transformed = transformed.replace(/import\s+.*?from\s+['"]react-dom(?:[\/\w-]*)?['"];?/g, '');
+  transformed = transformed.replace(/import\s+.*?from\s+['"]next\/[\w-]+['"];?/g, '');
+  transformed = transformed.replace(/import\s+['"][^'"]+\.(?:css|scss|less)['"];?/g, '');
+  transformed = transformed.replace(/import\s+.*?from\s+['"][^'"]+['"];?/g, '');
+
+  const iconShims = Array.from(lucideIcons)
+    .map((name) => `const ${name} = __createLucideIcon('${name}');`)
+    .join('\n    ');
+
+  const nextBanner = isNextJs
+    ? `<div style="background:#FEF3C7; color:#92400E; padding:8px 16px; font-size:12px; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid #FDE68A; z-index:9999;">
+        <span>⚡ <strong>Next.js Client Preview:</strong> Next.js-specific features like routing and server functions aren't previewed here.</span>
+        <span style="opacity:0.75; font-size:11px;">Client-side Simulation</span>
+      </div>`
+    : '';
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Alphanex App Preview</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    #preview-runtime-error { display: none; padding: 16px; margin: 16px; background: #FEF2F2; color: #991B1B; border: 1px solid #F87171; border-radius: 8px; font-family: monospace; font-size: 12px; white-space: pre-wrap; }
+  </style>
+</head>
+<body class="bg-neutral-50 text-neutral-900">
+  ${nextBanner}
+  <div id="preview-runtime-error"></div>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    window.addEventListener('error', (event) => {
+      const errEl = document.getElementById('preview-runtime-error');
+      if (errEl) {
+        errEl.style.display = 'block';
+        errEl.textContent = 'Runtime Error: ' + (event.error ? event.error.message : event.message);
+      }
+    });
+
+    const {
+      useState,
+      useEffect,
+      useRef,
+      useMemo,
+      useCallback,
+      useContext,
+      createContext,
+      useReducer,
+      useId,
+      useLayoutEffect
+    } = React;
+
+    // Next.js simulation shims
+    const Image = (props) => {
+      const { src, alt, width, height, fill, className, ...rest } = props;
+      return (
+        <img
+          src={src || ''}
+          alt={alt || ''}
+          className={className}
+          width={fill ? undefined : width}
+          height={fill ? undefined : height}
+          style={fill ? { width: '100%', height: '100%', objectFit: 'cover' } : undefined}
+          {...rest}
+        />
+      );
+    };
+    const Link = ({ href, children, className, ...props }) => (
+      <a
+        href={href || '#'}
+        className={className}
+        onClick={(e) => {
+          if (!href || href === '#') e.preventDefault();
+        }}
+        {...props}
+      >
+        {children}
+      </a>
+    );
+    const Head = () => null;
+    const useRouter = () => ({
+      push: () => {},
+      replace: () => {},
+      back: () => {},
+      pathname: '/',
+      query: {},
+      asPath: '/',
+    });
+    const usePathname = () => '/';
+    const useSearchParams = () => new URLSearchParams();
+
+    // Lucide Icon Helper
+    function __createLucideIcon(name) {
+      return function IconWrapper(props) {
+        const size = props.size || 20;
+        const strokeWidth = props.strokeWidth || 2;
+        const className = props.className || '';
+        const iconDef = window.lucide?.icons?.[name] || window.lucide?.icons?.[name.toLowerCase()];
+        if (iconDef && Array.isArray(iconDef[2])) {
+          return (
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width={size}
+              height={size}
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={strokeWidth}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className={className}
+              {...props}
+            >
+              {iconDef[2].map(([tag, attrs], i) => React.createElement(tag, { key: i, ...attrs }))}
+            </svg>
+          );
+        }
+        return (
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width={size}
+            height={size}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={strokeWidth}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={className}
+            {...props}
+          >
+            <circle cx="12" cy="12" r="9" />
+            <path d="M12 8v8M8 12h8" />
+          </svg>
+        );
+      };
+    }
+
+    ${iconShims}
+
+    // Generated Component Code
+    ${transformed}
+
+    // Mount Component
+    try {
+      const rootEl = document.getElementById('root');
+      if (rootEl) {
+        const TargetComponent = typeof ${componentName} !== 'undefined' ? ${componentName} : (typeof AppPreview !== 'undefined' ? AppPreview : null);
+        if (TargetComponent) {
+          const root = ReactDOM.createRoot(rootEl);
+          root.render(<TargetComponent />);
+        } else {
+          throw new Error("Could not find root component '${componentName}' to mount.");
+        }
+      }
+    } catch (err) {
+      console.error("Mount error:", err);
+      const errEl = document.getElementById('preview-runtime-error');
+      if (errEl) {
+        errEl.style.display = 'block';
+        errEl.textContent = 'Mount Error: ' + err.message;
+      }
+    }
+  </script>
+</body>
+</html>`;
+}
+
+function wrapVuePreviewHtml(code: string): string {
+  // Extract template
+  const templateMatch = code.match(/<template[^>]*>([\s\S]*?)<\/template>/i);
+  const templateHtml = templateMatch ? templateMatch[1].trim() : '<div class="p-6">Empty Vue Component</div>';
+
+  // Extract all styles
+  const styleMatches = Array.from(code.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/gi));
+  const styleCss = styleMatches.map((m) => m[1]).join('\n');
+
+  // Extract script
+  const scriptMatch = code.match(/<script([^>]*)>([\s\S]*?)<\/script>/i);
+  const isScriptSetup = scriptMatch ? scriptMatch[1].includes('setup') : false;
+  let rawScript = scriptMatch ? scriptMatch[2].trim() : '';
+
+  // Clean imports from script
+  rawScript = rawScript.replace(/import\s+.*?from\s+['"][^'"]+['"];?/g, '');
+  rawScript = rawScript.replace(/export\s+default\s+/g, 'const __userComponent = ');
+
+  let componentScript = '';
+  if (isScriptSetup) {
+    // Extract top-level variable and function declarations to return from setup()
+    const varNames = new Set<string>();
+    for (const m of rawScript.matchAll(/function\s+([A-Za-z0-9_$]+)/g)) {
+      varNames.add(m[1]);
+    }
+    for (const m of rawScript.matchAll(/(?:const|let|var)\s+([A-Za-z0-9_$,\s{}]+?)\s*=/g)) {
+      const raw = m[1].replace(/[{}]/g, '');
+      raw.split(',').forEach((v) => {
+        const clean = v.trim().split(':')[0].trim();
+        if (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(clean)) {
+          varNames.add(clean);
+        }
+      });
+    }
+
+    const returnsCode = Array.from(varNames)
+      .map((v) => `try { if (typeof ${v} !== 'undefined') __ret.${v} = ${v}; } catch(e) {}`)
+      .join('\n        ');
+
+    componentScript = `
+      const appComponent = {
+        template: '#app-template',
+        setup() {
+          const { ref, reactive, computed, watch, watchEffect, onMounted, onUnmounted, nextTick, toRefs } = Vue;
+          ${rawScript}
+          const __ret = {};
+          ${returnsCode}
+          return __ret;
+        }
+      };`;
+  } else if (rawScript.includes('__userComponent')) {
+    componentScript = `
+      ${rawScript}
+      const appComponent = {
+        template: '#app-template',
+        ...__userComponent
+      };`;
+  } else {
+    componentScript = `
+      const appComponent = {
+        template: '#app-template'
+      };`;
+  }
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Alphanex Vue App Preview</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+  <style>
+    body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    #preview-runtime-error { display: none; padding: 16px; margin: 16px; background: #FEF2F2; color: #991B1B; border: 1px solid #F87171; border-radius: 8px; font-family: monospace; font-size: 12px; white-space: pre-wrap; }
+    ${styleCss}
+  </style>
+</head>
+<body class="bg-neutral-50 text-neutral-900">
+  <div id="preview-runtime-error"></div>
+  <div id="app"></div>
+
+  <script type="text/x-template" id="app-template">
+    ${templateHtml}
+  </script>
+
+  <script>
+    window.addEventListener('error', (event) => {
+      const errEl = document.getElementById('preview-runtime-error');
+      if (errEl) {
+        errEl.style.display = 'block';
+        errEl.textContent = 'Runtime Error: ' + (event.error ? event.error.message : event.message);
+      }
+    });
+
+    document.addEventListener('DOMContentLoaded', () => {
+      try {
+        ${componentScript}
+
+        const app = Vue.createApp(appComponent);
+        app.config.errorHandler = (err) => {
+          console.error("Vue error:", err);
+          const errEl = document.getElementById('preview-runtime-error');
+          if (errEl) {
+            errEl.style.display = 'block';
+            errEl.textContent = 'Vue Error: ' + (err.message || String(err));
+          }
+        };
+        app.mount('#app');
+      } catch (err) {
+        console.error("Initialization error:", err);
+        const errEl = document.getElementById('preview-runtime-error');
+        if (errEl) {
+          errEl.style.display = 'block';
+          errEl.textContent = 'Initialization Error: ' + err.message;
+        }
+      }
+    });
+  </script>
+</body>
+</html>`;
+}
+

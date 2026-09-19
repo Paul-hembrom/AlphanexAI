@@ -10,7 +10,7 @@
  *    dumping raw code blocks, UNLESS the user explicitly requested code.
  */
 
-import { slugifyAppName, extractCodeFromMarkdown, ensureCompleteHtml } from './webapp-shared';
+import { slugifyAppName, extractCodeFromMarkdown, ensureCompleteHtml, wrapGeneratedCodeAsPreviewHtml } from './webapp-shared';
 import { BuildStack, UserProfileSettings, WebappBuildData } from './types';
 import { callOpenRouterCompletion, getOpenRouterApiKey } from './openrouter';
 import { runBuildCheckInSandbox } from './vercel-sandbox';
@@ -39,6 +39,7 @@ export interface BuildResult {
   summaryMarkdown: string;
   rawCodeRequested: boolean;
   attemptsMade: number;
+  repairIterations?: number;
 }
 
 /**
@@ -859,12 +860,23 @@ Design Requirements:
 - Include complete business logic for the requested domain.
 - Provide a brief 2-3 sentence overview at the beginning, followed by the complete code block.`;
 
+function extractCleanCode(response: string, stack: BuildStack): string {
+  if (stack === 'html-css-js') {
+    const extracted = extractCodeFromMarkdown(response);
+    return extracted ? ensureCompleteHtml(extracted) : ensureCompleteHtml(response);
+  }
+  const codeBlockRegex = /```(?:tsx|jsx|typescript|javascript|vue|dart)?\s*([\s\S]*?)```/i;
+  const match = response.match(codeBlockRegex);
+  return match && match[1] ? match[1].trim() : response.trim();
+}
+
   const conversationHistory: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
     { role: 'system', content: systemPrompt },
     { role: 'user', content: prompt },
   ];
 
   let currentCode = '';
+  let modelResponse = '';
   let finalCheckResult = {
     exitCode: 0,
     stdout: '',
@@ -876,103 +888,131 @@ Design Requirements:
   };
 
   let attemptsMade = 0;
-  const maxAttempts = 3;
+  let repairIterations = 0;
+  const maxRepairIterations = 3;
 
-  const hasKey = !!(
-    options.openRouterApiKey ||
-    getOpenRouterApiKey() ||
-    (process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'MY_GEMINI_API_KEY')
-  );
+  // 1. Initial Generation via OpenRouter API
+  attemptsMade = 1;
+  options.onThinking?.(`Invoking OpenRouter API (${modelId}) to generate ${stack} code bundle...`);
 
-  if (!hasKey) {
-    options.onThinking?.('No frontier API key detected. Verifying local starter scaffold in sandbox...');
-    currentCode =
-      stack === 'html-css-js'
-        ? generateEcommerceAppHtml()
-        : `// Verified scaffold for ${stack}\nexport default function App() {\n  return <div>Scaffold Ready</div>;\n}`;
+  try {
+    modelResponse = await callOpenRouterCompletion({
+      apiKey: options.openRouterApiKey,
+      modelId,
+      messages: conversationHistory,
+      temperature: 0.2,
+      maxTokens: 8192,
+    });
+    currentCode = extractCleanCode(modelResponse, stack);
+  } catch (err: unknown) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    finalCheckResult = {
+      exitCode: 1,
+      stdout: '',
+      stderr: `OpenRouter API Generation Error: ${errorMsg}`,
+      passed: false,
+      checksRun: 1,
+      checksPassed: 0,
+      verificationLog: [`✗ OpenRouter API Generation Error: ${errorMsg}`],
+    };
+  }
+
+  // 2. Initial Sandbox Compilation & Lint Verification
+  if (currentCode) {
+    options.onThinking?.(`Running sandbox compilation check on generated ${filename}...`);
     finalCheckResult = await runBuildCheckInSandbox(
       [{ path: filename, content: currentCode }],
       stack,
       options.settings
     );
-    attemptsMade = 1;
-  } else {
-    // Real LLM Generation & Auto Bug-Fix Loop
-    while (attemptsMade < maxAttempts) {
-      attemptsMade++;
-      options.onThinking?.(
-        attemptsMade === 1
-          ? `Invoking frontier model ${modelId} to generate ${stack} code bundle...`
-          : `Bug-fix iteration #${attemptsMade}: Requesting model to fix syntax error...`
-      );
 
-      let modelResponse = '';
-      try {
-        modelResponse = await callOpenRouterCompletion({
-          apiKey: options.openRouterApiKey,
-          modelId,
-          messages: conversationHistory,
-          temperature: attemptsMade === 1 ? 0.2 : 0.1,
-          maxTokens: 8192,
-        });
-      } catch (err: unknown) {
-        const errorMsg = err instanceof Error ? err.message : String(err);
-        finalCheckResult = {
-          exitCode: 1,
-          stdout: '',
-          stderr: `LLM Generation Failed: ${errorMsg}`,
-          passed: false,
-          checksRun: 1,
-          checksPassed: 0,
-          verificationLog: [`✗ LLM Generation Error: ${errorMsg}`],
-        };
-        break;
-      }
+    if (finalCheckResult.passed) {
+      options.onThinking?.(`✓ Sandbox compilation succeeded on initial pass with 0 syntax errors.`);
+    }
+  }
 
-      // Extract code from response
-      if (stack === 'html-css-js') {
-        const extracted = extractCodeFromMarkdown(modelResponse);
-        currentCode = extracted ? ensureCompleteHtml(extracted) : ensureCompleteHtml(modelResponse);
-      } else {
-        const codeBlockRegex = /```(?:tsx|jsx|typescript|javascript|vue|dart)?\s*([\s\S]*?)```/i;
-        const match = modelResponse.match(codeBlockRegex);
-        currentCode = match && match[1] ? match[1].trim() : modelResponse;
-      }
+  // 3. Repair Loop: Feed back stderr / compiler errors for up to 3 repair iterations
+  while (!finalCheckResult.passed && repairIterations < maxRepairIterations) {
+    repairIterations++;
+    attemptsMade++;
 
-      options.onThinking?.(`Running sandbox compilation check on generated ${filename}...`);
+    const errorDetails =
+      finalCheckResult.stderr ||
+      finalCheckResult.verificationLog.filter((l) => l.startsWith('✗')).join('\n') ||
+      'Syntax or compilation check failed in sandbox.';
 
-      const check = await runBuildCheckInSandbox(
-        [{ path: filename, content: currentCode }],
-        stack,
-        options.settings
-      );
-      finalCheckResult = check;
+    options.onThinking?.(
+      `Repair iteration #${repairIterations}/3: Sandbox detected error (${errorDetails.slice(0, 80)}...). Feeding back to model for auto-repair...`
+    );
 
-      if (check.passed) {
-        options.onThinking?.(`✓ Sandbox compilation succeeded with zero syntax errors.`);
-        break;
-      }
+    conversationHistory.push({ role: 'assistant', content: modelResponse });
+    conversationHistory.push({
+      role: 'user',
+      content: `The generated code failed compilation / sandbox verification with this exact error:\n\`\`\`\n${errorDetails}\n\`\`\`\n\nPlease fix this error and return the complete, corrected code bundle inside a single markdown code block. Do NOT truncate or omit any parts of the code.`,
+    });
 
-      options.onThinking?.(`⚠️ Sandbox detected syntax error: ${check.stderr}. Initiating auto-fix...`);
-      conversationHistory.push({ role: 'assistant', content: modelResponse });
-      conversationHistory.push({
-        role: 'user',
-        content: `The generated code failed compilation with this exact error:\n${check.stderr}\n\nPlease fix this error and return the complete, corrected code bundle inside a single markdown code block.`,
+    try {
+      modelResponse = await callOpenRouterCompletion({
+        apiKey: options.openRouterApiKey,
+        modelId,
+        messages: conversationHistory,
+        temperature: 0.1, // Lower temperature for surgical fix
+        maxTokens: 8192,
       });
+      currentCode = extractCleanCode(modelResponse, stack);
+    } catch (err: unknown) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      finalCheckResult = {
+        exitCode: 1,
+        stdout: '',
+        stderr: `OpenRouter API Repair Error (iteration ${repairIterations}): ${errorMsg}`,
+        passed: false,
+        checksRun: finalCheckResult.checksRun + 1,
+        checksPassed: finalCheckResult.checksPassed,
+        verificationLog: [
+          ...finalCheckResult.verificationLog,
+          `✗ Repair Iteration #${repairIterations} API Error: ${errorMsg}`,
+        ],
+      };
+      break;
+    }
+
+    options.onThinking?.(
+      `Verifying repaired ${filename} in sandbox (repair iteration ${repairIterations}/${maxRepairIterations})...`
+    );
+
+    finalCheckResult = await runBuildCheckInSandbox(
+      [{ path: filename, content: currentCode }],
+      stack,
+      options.settings
+    );
+
+    if (finalCheckResult.passed) {
+      options.onThinking?.(
+        `✓ Sandbox compilation succeeded on repair iteration #${repairIterations} with 0 syntax errors.`
+      );
+      break;
+    } else {
+      options.onThinking?.(
+        `⚠️ Sandbox check still failing on repair iteration #${repairIterations}: ${finalCheckResult.stderr.slice(0, 80)}`
+      );
     }
   }
 
   const buildStatus: 'success' | 'failed' = finalCheckResult.passed ? 'success' : 'failed';
   const features: string[] = [
     `Target Stack: ${stack}`,
+    `Frontier Model: ${modelId}`,
     `Sandbox Compiler Engine: ${options.settings?.codeExecutionEngine || 'cloud_sandbox'}`,
     `Compiled Bundle: ${filename} (${currentCode.length} bytes)`,
-    attemptsMade > 1
-      ? `Auto Bug-Fix Loop: ${attemptsMade} attempts to resolve compilation issues`
-      : `Scaffold: Compiled on first attempt without syntax errors`,
+    repairIterations > 0
+      ? finalCheckResult.passed
+        ? `Auto-Repair Loop: Resolved compilation issues after ${repairIterations} repair iteration(s)`
+        : `Auto-Repair Loop: Failed after ${repairIterations} repair iteration(s)`
+      : `Clean Pass: Compiled on initial attempt without syntax errors`,
   ];
 
-  if (options.settings?.autoGeneratePrOnBugFix && attemptsMade > 1) {
+  if (options.settings?.autoGeneratePrOnBugFix && repairIterations > 0) {
     features.push('Auto-Fix PR: Automated patch record queued for sandbox changes.');
   }
 
@@ -980,10 +1020,10 @@ Design Requirements:
   if (finalCheckResult.passed) {
     summaryMarkdown = `### ${appTitle}
 
-Your application has been generated, compiled, and verified in the **${stack}** sandbox using **${modelId}**.
+Your application has been generated by the OpenRouter API, verified, and compiled in the **${stack}** sandbox using **${modelId}**.
 
 #### ⚡ Real Sandbox Compilation Results
-- **Status**: \`Build Succeeded (${attemptsMade} attempt${attemptsMade > 1 ? 's' : ''})\`
+- **Status**: \`Build Succeeded (${attemptsMade} total pass${attemptsMade > 1 ? 'es' : ''}, ${repairIterations} repair iteration${repairIterations === 1 ? '' : 's'})\`
 - **Compiler Checks**: \`${finalCheckResult.checksPassed}/${finalCheckResult.checksRun} passed\`
 - **Syntax Exceptions**: \`0 bugs detected\`
 - **Stack**: \`${stack}\`
@@ -992,20 +1032,14 @@ Your application has been generated, compiled, and verified in the **${stack}** 
 ${features.map((f) => `- ${f}`).join('\n')}
 
 ${
-  stack === 'html-css-js'
+  stack === 'html-css-js' || stack === 'react' || stack === 'nextjs' || stack === 'vue'
     ? '> **Live Preview Active:** The application is running in the interactive Web Preview sandbox on the right.'
     : '> **Source Ready:** Source code has been compiled and verified for mobile/framework export.'
-}
-
-${
-  !hasKey
-    ? '\n\n> ⚠️ *Note: No OPENROUTER_API_KEY or GEMINI_API_KEY was configured in the environment. A local verified starter scaffold was compiled. Configure your API key in settings for custom frontier generation.*'
-    : ''
 }`;
   } else {
     summaryMarkdown = `### ⚠️ Compilation Warning: ${appTitle}
 
-The sandbox compiler encountered an error during verification after ${attemptsMade} attempts.
+The sandbox compiler encountered an error during verification after ${attemptsMade} attempts (${repairIterations} repair iterations).
 
 #### ⚡ Compiler Diagnostics
 - **Status**: \`Build Failed\`
@@ -1023,10 +1057,15 @@ You can inspect the code below and adjust your prompt or fix the syntax directly
     summaryMarkdown += `\n\n#### Source Code (${filename})\n\`\`\`${lang}\n${currentCode}\n\`\`\``;
   }
 
+  const previewHtml =
+    finalCheckResult.passed && (stack === 'react' || stack === 'nextjs' || stack === 'vue')
+      ? wrapGeneratedCodeAsPreviewHtml(currentCode, stack)
+      : currentCode;
+
   return {
     appName,
     appTitle,
-    html: currentCode,
+    html: previewHtml,
     stack,
     testsPassed: finalCheckResult.checksPassed,
     testsTotal: finalCheckResult.checksRun,
@@ -1037,5 +1076,6 @@ You can inspect the code below and adjust your prompt or fix the syntax directly
     summaryMarkdown,
     rawCodeRequested,
     attemptsMade,
+    repairIterations,
   };
 }

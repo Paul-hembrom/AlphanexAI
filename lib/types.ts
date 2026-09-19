@@ -133,6 +133,8 @@ export interface WebappBuildData {
   features?: string[];
   rawCodeRequested?: boolean;
   verificationLog?: string[];
+  attemptsMade?: number;
+  repairIterations?: number;
 }
 
 export interface ChatMessage {
