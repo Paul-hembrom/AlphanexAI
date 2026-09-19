@@ -4,7 +4,7 @@ import { WorkMode } from '@/lib/types';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-export const maxDuration = 60;
+export const maxDuration = 500;
 
 /**
  * Dedicated OpenRouter Chat Completion Route

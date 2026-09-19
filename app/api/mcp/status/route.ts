@@ -3,6 +3,7 @@ import { getMCPManager } from '@/lib/mcp-clients';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+export const maxDuration = 500;
 
 const BUILTIN_TOOLS = [
   // GitHub

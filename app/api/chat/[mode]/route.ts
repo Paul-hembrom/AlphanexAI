@@ -6,7 +6,7 @@ import { isAppBuildRequest, buildApplicationFromPrompt } from '@/lib/webapp-buil
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-export const maxDuration = 60;
+export const maxDuration = 500;
 
 export async function POST(
   req: NextRequest,
