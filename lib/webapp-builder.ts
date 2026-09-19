@@ -10,7 +10,7 @@
  *    dumping raw code blocks, UNLESS the user explicitly requested code.
  */
 
-import { slugifyAppName, extractCodeFromMarkdown, ensureCompleteHtml } from './webapp-preview';
+import { slugifyAppName, extractCodeFromMarkdown, ensureCompleteHtml } from './webapp-shared';
 import { BuildStack, UserProfileSettings, WebappBuildData } from './types';
 import { callOpenRouterCompletion, getOpenRouterApiKey } from './openrouter';
 import { runBuildCheckInSandbox } from './vercel-sandbox';

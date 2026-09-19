@@ -157,7 +157,7 @@ export async function POST(
             sendEvent({
               type: 'routing',
               modelId,
-              targetModel: 'gemini-2.5-flash',
+              targetModel: 'gemini-3.5-flash',
               provider: 'Google GenAI',
               reasoningEffort,
             });
@@ -171,9 +171,9 @@ export async function POST(
               await new Promise((r) => setTimeout(r, 300));
             }
 
-            // Call generateContentStream with supported gemini-2.5-flash model
+            // Call generateContentStream with supported gemini-3.5-flash model
             const responseStream = await ai.models.generateContentStream({
-              model: 'gemini-2.5-flash',
+              model: 'gemini-3.5-flash',
               contents: prompt,
               config: config as any,
             });
@@ -263,14 +263,14 @@ export async function POST(
         controller.close();
       } catch (err: any) {
         console.error('Chat stream error:', err);
-        // Even on outer error, provide graceful recovery
+        const errorMessage = err?.message || 'Internal processing error';
         sendEvent({
           type: 'content',
-          content: `I encountered an unexpected connection interrupt (${err?.message || 'timeout'}). Let me provide the resolution directly.`,
+          content: `⚠️ **Build Failed**: ${errorMessage}\n\nThe operation could not be completed. Please check your configuration, verify API keys in Settings, or try again.`,
         });
         sendEvent({
           type: 'done',
-          tokens: { promptTokens: 50, completionTokens: 100, totalTokens: 150 },
+          tokens: { promptTokens: 50, completionTokens: 50, totalTokens: 100 },
         });
         controller.close();
       }

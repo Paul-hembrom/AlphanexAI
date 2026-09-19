@@ -466,11 +466,17 @@ export async function callOpenRouterCompletion(
     const { GoogleGenAI } = await import('@google/genai');
     const ai = new GoogleGenAI({ apiKey: geminiKey });
     const promptText = options.messages.map((m) => `${m.role.toUpperCase()}: ${m.content}`).join('\n\n');
-    const res = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: promptText,
-    });
-    if (res.text) return res.text;
+    for (const m of ['gemini-3.5-flash', 'gemini-3.8-flash', 'gemini-3.6-flash']) {
+      try {
+        const res = await ai.models.generateContent({
+          model: m,
+          contents: promptText,
+        });
+        if (res.text) return res.text;
+      } catch (err: any) {
+        console.warn(`Gemini model ${m} failed (${err?.message}), trying next fallback...`);
+      }
+    }
   }
 
   throw new Error(
