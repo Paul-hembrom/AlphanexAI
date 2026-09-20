@@ -7,6 +7,7 @@ import {
   searchSerper,
   serperResultsToCitations,
   formatSerperResultsForGrounding,
+  isResearchQuery,
 } from '@/lib/serper';
 
 export const runtime = 'nodejs';
@@ -107,7 +108,7 @@ export async function POST(
           return;
         }
 
-        // Researcher Mode: Perform real Serper search if SERPER_API_KEY is available
+        // Researcher Mode: Perform real Serper search if SERPER_API_KEY is available and query has research intent
         let serperCitations: Citation[] = [];
         let baseSysInstruction =
           params.systemInstruction ||
@@ -117,7 +118,9 @@ export async function POST(
             ? 'You are a Senior Tech Analyst and Academic Fellow specializing in Nepal and South Asia technology. Provide authoritative, deeply factual information with clear citations.'
             : 'You are an intelligent reasoning assistant with warm, articulate explanations.');
 
-        if (mode === 'researcher') {
+        const isResearch = mode === 'researcher' && isResearchQuery(prompt);
+
+        if (isResearch) {
           const serperKey = process.env.SERPER_API_KEY?.trim() || process.env.serper_api_key?.trim();
           if (serperKey && serperKey !== 'MY_SERPER_API_KEY') {
             try {
@@ -142,9 +145,15 @@ export async function POST(
         }
         params.systemInstruction = baseSysInstruction;
 
+        let openRouterAttempted = false;
+        let openRouterError: string | null = null;
+        let geminiAttempted = false;
+        let geminiError: string | null = null;
+
         // Priority 1: OpenRouter Unified LLM Router with backend token capping
         const openRouterKey = getOpenRouterApiKey();
         if (openRouterKey) {
+          openRouterAttempted = true;
           try {
             await streamOpenRouter({
               apiKey: openRouterKey,
@@ -160,9 +169,10 @@ export async function POST(
             controller.close();
             return;
           } catch (openRouterErr: any) {
+            openRouterError = openRouterErr?.message || String(openRouterErr);
             console.warn(
               'OpenRouter streaming encountered an issue, checking fallback providers:',
-              openRouterErr?.message || openRouterErr
+              openRouterError
             );
           }
         }
@@ -171,6 +181,7 @@ export async function POST(
 
         // If apiKey is available and not a placeholder, try real @google/genai streaming
         if (apiKey && apiKey !== 'MY_GEMINI_API_KEY') {
+          geminiAttempted = true;
           let accumulatedText = '';
           try {
             const ai = new GoogleGenAI({
@@ -189,9 +200,10 @@ export async function POST(
               maxOutputTokens: typeof params.maxOutputTokens === 'number' ? Math.min(params.maxOutputTokens, 8192) : 4096,
             };
 
-            // If SERPER_API_KEY is missing or yielded no results, fall back to Gemini's native googleSearch grounding.
+            // If query is an active research query and SERPER_API_KEY yielded no results, fall back to Gemini's native googleSearch grounding.
             // If Serper provided results, Serper results are already in systemInstruction and emitted as citations.
-            if ((mode === 'researcher' && serperCitations.length === 0) || params.groundingEnabled) {
+            // Casual queries (like "hi") skip web search grounding.
+            if ((isResearch && serperCitations.length === 0) || params.groundingEnabled) {
               config.tools = [{ googleSearch: {} }];
             }
 
@@ -263,7 +275,7 @@ export async function POST(
             sendEvent({
               type: 'done',
               modelId,
-              routedModel: 'gemini-2.5-flash',
+              routedModel: 'gemini-3.5-flash',
               provider: 'Google GenAI',
               tokens: {
                 promptTokens: Math.round(prompt.length / 4),
@@ -274,17 +286,18 @@ export async function POST(
             });
             controller.close();
             return;
-          } catch (geminiError: any) {
+          } catch (geminiErr: any) {
+            geminiError = geminiErr?.message || String(geminiErr);
             console.warn(
-              'Gemini API quota or rate limit error encountered (e.g. 429), smoothly activating high-fidelity offline engine:',
-              geminiError?.message || geminiError
+              'Gemini API error encountered:',
+              geminiError
             );
-            // If some text was already streamed before quota was hit, complete it
+            // If some text was already streamed before error was hit, complete it
             if (accumulatedText.length > 0) {
               sendEvent({
                 type: 'content',
                 content:
-                  '\n\n> *Note: Model response completed using local resilient inference engine.*',
+                  `\n\n> ⚠️ *Stream interrupted*: ${geminiError}`,
               });
               sendEvent({
                 type: 'done',
@@ -302,8 +315,21 @@ export async function POST(
           }
         }
 
-        // Resilient intelligent simulator for frontier models and offline/rate-limited environments
-        await simulateStreamingResponse(mode, modelId, prompt, reasoningEffort, sendEvent, serperCitations);
+        // Transparent diagnostics reporter when all providers fail or are unconfigured
+        await simulateStreamingResponse(
+          mode,
+          modelId,
+          prompt,
+          reasoningEffort,
+          sendEvent,
+          serperCitations,
+          {
+            openRouterAttempted,
+            openRouterError,
+            geminiAttempted,
+            geminiError,
+          }
+        );
         controller.close();
       } catch (err: any) {
         console.error('Chat stream error:', err);
@@ -330,234 +356,124 @@ export async function POST(
   });
 }
 
-// Simulated intelligent streamer tailored for Nepal devs and researchers
+interface ProviderDiagnostics {
+  openRouterAttempted?: boolean;
+  openRouterError?: string | null;
+  geminiAttempted?: boolean;
+  geminiError?: string | null;
+}
+
+// Transparent provider failure and diagnostics reporter
 async function simulateStreamingResponse(
   mode: WorkMode,
   modelId: string,
   prompt: string,
   reasoningEffort: string,
   sendEvent: (data: Record<string, unknown>) => void,
-  initialCitations: Citation[] = []
+  initialCitations: Citation[] = [],
+  diagnostics?: ProviderDiagnostics
 ) {
   // Send routing confirmation
   sendEvent({
     type: 'routing',
     modelId,
-    targetModel: `offline-fallback (${modelId})`,
-    provider: 'Offline Fallback Engine',
+    targetModel: modelId,
+    provider: 'Provider Diagnostics',
     reasoningEffort,
   });
 
-  // Thinking phase
+  // Diagnostics thinking status
   sendEvent({
     type: 'thinking',
-    content: `[Offline Fallback] No frontier API key available for ${modelId}. Providing local template response.`,
+    content: `Model provider execution halted: diagnostic analysis in progress...`,
   });
-  await new Promise((r) => setTimeout(r, 200));
+  await new Promise((r) => setTimeout(r, 100));
 
-  let fullResponse = '> ⚠️ **Offline Fallback Notice**: Live model streaming requires an active `OPENROUTER_API_KEY` or `GEMINI_API_KEY`. Below is an offline developer reference.\n\n';
-  let citations: Citation[] | undefined = initialCitations.length > 0 ? initialCitations : undefined;
-  let diffData: DiffData | undefined = undefined;
+  const openRouterErr = diagnostics?.openRouterError;
+  const geminiErr = diagnostics?.geminiError;
+  const openRouterAttempted = diagnostics?.openRouterAttempted;
+  const geminiAttempted = diagnostics?.geminiAttempted;
 
-  const promptLower = prompt.toLowerCase();
+  // Identify root cause
+  let primaryCause = '';
+  const detailLines: string[] = [];
 
-  if (mode === 'developer') {
-    if (promptLower.includes('esewa') || promptLower.includes('signature') || promptLower.includes('payment')) {
-      fullResponse = `### eSewa EPAY v2.0 Signature Verification Fix
-
-The HMAC-SHA256 signature mismatch occurs because eSewa EPAY v2 requires a strictly formatted comma-delimited parameter string (\`total_amount=...,transaction_uuid=...,product_code=...\`) rather than raw concatenated text. Furthermore, the secret key must sign raw UTF-8 bytes and return a base64-encoded digest.
-
-#### Identified Root Causes:
-1. **Parameter String Format**: eSewa v2 checks the exact payload string \`"total_amount=100,transaction_uuid=ab123,product_code=EPAYTEST"\`.
-2. **Digest Encoding**: Must produce a Base64-encoded string instead of hex.
-3. **Timing Safety**: Use \`hmac.compare_digest()\` to defend against timing side-channel attacks on financial webhooks.
-
-\`\`\`python
-# payment_gateway/esewa_v2.py
-import hmac
-import hashlib
-import base64
-
-def verify_esewa_signature(
-    total_amount: str,
-    transaction_uuid: str,
-    product_code: str,
-    secret_key: str,
-    received_signature: str
-) -> bool:
-    """
-    Verify eSewa EPAY v2.0 callback signature using HMAC-SHA256 and Base64 digest.
-    Standard message pattern: total_amount={amount},transaction_uuid={uuid},product_code={code}
-    """
-    # Fix 1: Properly delimit key-value pairs as required by eSewa EPAY v2
-    message = f"total_amount={total_amount},transaction_uuid={transaction_uuid},product_code={product_code}"
-    
-    # Fix 2: Calculate HMAC-SHA256 and base64-encode the raw binary digest
-    signature_bytes = hmac.new(
-        secret_key.encode('utf-8'),
-        message.encode('utf-8'),
-        hashlib.sha256
-    ).digest()
-    
-    computed_signature = base64.b64encode(signature_bytes).decode('utf-8')
-    
-    # Fix 3: Constant-time comparison to prevent timing attacks
-    return hmac.compare_digest(computed_signature, received_signature)
-\`\`\`
-
-> **Canvas Action:** I have prepared a side-by-side diff in the **Canvas** panel on the right. You can review the exact red/green line changes, run the code in the Python WASM terminal, or push a Git PR directly!`;
-
-      diffData = {
-        filename: 'payment_gateway/esewa_v2.py',
-        language: 'python',
-        explanation: 'Fixed HMAC-SHA256 signature generation: replaced plaintext key encoding with base64 secret decoding, and corrected message string parameter ordering according to eSewa EPAY v2.0 specification.',
-        additions: 12,
-        deletions: 5,
-        originalCode: `import hmac
-import hashlib
-
-def verify_esewa_signature(total_amount: str, transaction_uuid: str, product_code: str, secret_key: str, received_signature: str) -> bool:
-    # BUG: eSewa v2 requires format "total_amount=...,transaction_uuid=...,product_code=..."
-    message = f"{total_amount}{transaction_uuid}{product_code}"
-    
-    signature = hmac.new(
-        secret_key.encode('utf-8'),
-        message.encode('utf-8'),
-        hashlib.sha256
-    ).hexdigest()
-    
-    return signature == received_signature`,
-        fixedCode: `import hmac
-import hashlib
-import base64
-
-def verify_esewa_signature(total_amount: str, transaction_uuid: str, product_code: str, secret_key: str, received_signature: str) -> bool:
-    """
-    Verify eSewa EPAY v2.0 callback signature using HMAC-SHA256 and Base64 digest.
-    Standard message pattern: total_amount={amount},transaction_uuid={uuid},product_code={code}
-    """
-    # Fix 1: Properly delimit key-value pairs as required by eSewa EPAY v2
-    message = f"total_amount={total_amount},transaction_uuid={transaction_uuid},product_code={product_code}"
-    
-    # Fix 2: Calculate HMAC-SHA256 and base64-encode the raw binary digest
-    signature_bytes = hmac.new(
-        secret_key.encode('utf-8'),
-        message.encode('utf-8'),
-        hashlib.sha256
-    ).digest()
-    
-    computed_signature = base64.b64encode(signature_bytes).decode('utf-8')
-    
-    # Fix 3: Constant-time comparison to prevent timing attacks
-    return hmac.compare_digest(computed_signature, received_signature)`,
-      };
+  if (geminiErr) {
+    const lower = geminiErr.toLowerCase();
+    if (geminiErr.includes('429') || lower.includes('quota') || lower.includes('resource_exhausted')) {
+      primaryCause =
+        'Google Gemini API quota or rate limit exceeded (HTTP 429). The request allowance for this model is temporarily exhausted.';
+    } else if (geminiErr.includes('401') || geminiErr.includes('403') || lower.includes('key')) {
+      primaryCause =
+        'Google Gemini API authentication failed. The configured `GEMINI_API_KEY` is invalid or unauthorized.';
+    } else if (lower.includes('timeout') || lower.includes('abort') || lower.includes('etimedout')) {
+      primaryCause = 'The request timed out while waiting for a response from the Google Gemini API.';
     } else {
-      fullResponse = `### Production Implementation & Diagnostic Architecture
-
-Here is the optimized solution designed for high concurrency and regional network resilience.
-
-\`\`\`python
-# services/pipeline_worker.py
-import asyncio
-import logging
-from typing import Any, Dict, Optional
-
-logger = logging.getLogger("aifesta.worker")
-
-class ResilientWorker:
-    def __init__(self, cluster_endpoint: str, timeout_seconds: float = 3.5):
-        self.endpoint = cluster_endpoint
-        self.timeout = timeout_seconds
-        self._circuit_open = False
-
-    async def execute_task(self, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Executes task with exponential backoff and localized failover."""
-        if self._circuit_open:
-            logger.warning("Circuit breaker is active. Skipping execution.")
-            return None
-
-        for attempt in range(1, 4):
-            try:
-                # Simulated async network request to Kathmandu cluster
-                await asyncio.sleep(0.05 * attempt)
-                return {"status": "success", "attempt": attempt, "result": "Telemetry validated"}
-            except Exception as e:
-                logger.error(f"Attempt {attempt} failed: {e}")
-                await asyncio.sleep(0.2 * (2 ** attempt))
-                
-        self._circuit_open = True
-        return None
-\`\`\`
-
-#### Key Architectural Highlights:
-- **Exponential Backoff**: Mitigates transit jitter across regional peering routes.
-- **Fail-Safe Circuit Breaker**: Protects downstream microservices during upstream gateway drops.
-- **Type Annotated**: 100% strict Python type hinting for clean IDE static analysis.`;
-
-      diffData = {
-        filename: 'services/pipeline_worker.py',
-        language: 'python',
-        explanation: 'Added resilient circuit breaker and exponential backoff retry loop for Kathmandu cluster service.',
-        additions: 15,
-        deletions: 4,
-        originalCode: `class ResilientWorker:\n    def __init__(self, endpoint):\n        self.endpoint = endpoint\n    def execute(self, payload):\n        # Direct call without retries or timeouts\n        return {"status": "ok"}`,
-        fixedCode: `class ResilientWorker:\n    def __init__(self, cluster_endpoint: str, timeout_seconds: float = 3.5):\n        self.endpoint = cluster_endpoint\n        self.timeout = timeout_seconds\n        self._circuit_open = False\n\n    async def execute_task(self, payload: dict) -> dict:\n        """Executes task with exponential backoff."""\n        # Resilient retry logic with circuit breaker\n        return {"status": "success", "cluster": "Kathmandu-DC-1"}`,
-      };
+      primaryCause = `Google Gemini encountered an error: ${geminiErr}`;
     }
-  } else if (mode === 'researcher') {
-    citations = undefined;
-
-    fullResponse = `> ⚠️ **Offline Fallback**: Live web search grounding requires an active Gemini or Perplexity connection. Citations are omitted in offline mode.
-
-### Research Reference: Technology & AI Development
-
-When live grounding is enabled, verified sources, academic papers, and government bulletins are queried in real time. Configure \`GEMINI_API_KEY\` or an OpenRouter key with Perplexity Sonar in Settings to enable real-time search grounding with live verified citations.
-
-#### 2. Digital Infrastructure & National Payment Rails
-- **Interoperability**: Real-time retail payments have experienced exponential growth, underpinned by the **National Payment Switch (NPS)** and retail QR interoperability (**NepalPay / Fonepay**).
-- **Fintech Scale**: Digital payment transactions now exceed **NPR 3.4 Trillion** annually, accelerating transition from cash to mobile wallets (**eSewa, Khalti, IME Pay**).
-- **Cloud & Edge Latency**: Direct international peering through submarine cable gateways via Birgunj and Bhairahawa has reduced average round-trip latency to regional cloud hubs (AWS Mumbai, GCP Delhi) to **sub-38ms**.
-
-#### 3. Academic & Frontier AI Initiatives
-- **Devanagari NLP**: Academic consortiums at Kathmandu University (KU) and Pulchowk Campus (IOE) have published notable benchmarks for Nepali tokenization efficiency, overcoming classic unicode split errors.
-- **Climate & Glacial Telemetry**: High-altitude remote sensing models deployed in partnership with ICIMOD utilize open satellite constellations (Sentinel-2, Landsat-9) to predict GLOF vulnerabilities in the Dudh Koshi and Rolwaling valleys.`;
-  } else {
-    // General Mode
-    fullResponse = `### Structured Synthesis & Strategic Roadmap
-
-Here is a clear, multifaceted perspective tailored for immediate execution:
-
-1. **Strategic Intent & Problem Definition**:
-   Define the primary objective with high fidelity. In modern workflows, clarity of requirements reduces iterations by over 60%.
-
-2. **Core Capabilities & Phased Execution**:
-   - **Phase 1 (Validation)**: Build a focused prototype using open, composable toolchains.
-   - **Phase 2 (Scalability)**: Establish automated testing, observability metrics, and regional CDN caching.
-   - **Phase 3 (Optimization)**: Fine-tune model inference, caching frequently queried embeddings to minimize compute expenses.
-
-3. **Regional Relevance**:
-   For deployments in South Asia & Nepal, always account for intermittent network variations, dual-currency accounting (NPR & USD), and localization for Devanagari script where applicable.
-
-Feel free to switch modes at the top bar to **Developer Mode** for live code diffs and in-browser Python debugging, or **Researcher Mode** for deep source-grounded academic analysis!`;
+    detailLines.push(`- **Google GenAI**: ${geminiErr}`);
   }
 
+  if (openRouterErr) {
+    const lower = openRouterErr.toLowerCase();
+    if (!primaryCause) {
+      if (openRouterErr.includes('429') || lower.includes('rate')) {
+        primaryCause = 'OpenRouter API rate limit reached.';
+      } else if (openRouterErr.includes('401') || openRouterErr.includes('403')) {
+        primaryCause = 'OpenRouter API authentication failed. Please verify your OpenRouter API key in Settings.';
+      } else if (lower.includes('timeout') || lower.includes('abort')) {
+        primaryCause = 'OpenRouter request timed out.';
+      } else {
+        primaryCause = `OpenRouter error: ${openRouterErr}`;
+      }
+    }
+    detailLines.push(`- **OpenRouter**: ${openRouterErr}`);
+  }
+
+  if (!primaryCause) {
+    if (!openRouterAttempted && !geminiAttempted) {
+      primaryCause =
+        'No active model provider API key is configured. Neither `GEMINI_API_KEY` nor `OPENROUTER_API_KEY` is available in Settings.';
+    } else {
+      primaryCause = 'Model providers were attempted but failed to return a valid response.';
+    }
+  }
+
+  let fullResponse = `### ⚠️ Request Could Not Be Completed\n\n`;
+  fullResponse += `Unable to generate a model response for target model **${modelId}** in **${mode.toUpperCase()}** mode.\n\n`;
+  fullResponse += `**Primary Failure Reason:**\n${primaryCause}\n\n`;
+
+  if (detailLines.length > 0) {
+    fullResponse += `**Diagnostic Details:**\n${detailLines.join('\n')}\n\n`;
+  }
+
+  // Citations handling (Fix #3):
+  // If Serper citations already fired and reached the client, acknowledge them; never claim citations are unavailable.
+  if (initialCitations.length > 0) {
+    fullResponse += `> ℹ️ **Search Grounding Note**: Real-time web search via Google Serper succeeded and retrieved ${initialCitations.length} verified source citation(s) (displayed in the citation cards above). However, the language model could not complete the final text synthesis.\n\n`;
+  } else if (mode === 'researcher') {
+    fullResponse += `> ℹ️ **Search Grounding Note**: Live web search grounding was skipped (casual input/small-talk) or could not be completed.\n\n`;
+  }
+
+  fullResponse += `**Troubleshooting Steps:**\n`;
+  if (geminiErr?.includes('429') || openRouterErr?.includes('429')) {
+    fullResponse += `- **Rate Limit**: If using free-tier quota, wait 15–30 seconds before retrying.\n`;
+  }
+  fullResponse += `- **API Keys**: Open the **Settings** menu at the top right to verify or configure your \`GEMINI_API_KEY\` or \`OPENROUTER_API_KEY\`.\n`;
+  fullResponse += `- **Switch Models**: You can select another model or adjust reasoning effort in the top control bar.`;
+
   // Send citations if available
-  if (citations) {
-    sendEvent({ type: 'citations', citations });
+  if (initialCitations.length > 0) {
+    sendEvent({ type: 'citations', citations: initialCitations });
   }
 
   // Stream content in chunks to simulate realistic typing
   const words = fullResponse.split(' ');
-  const chunkSize = 4;
+  const chunkSize = 6;
   for (let i = 0; i < words.length; i += chunkSize) {
     const chunk = words.slice(i, i + chunkSize).join(' ') + ' ';
     sendEvent({ type: 'content', content: chunk });
-    await new Promise((r) => setTimeout(r, 40));
-  }
-
-  // Send diff if available
-  if (diffData) {
-    sendEvent({ type: 'diff', diff: diffData });
+    await new Promise((r) => setTimeout(r, 20));
   }
 
   // Send done
@@ -565,12 +481,12 @@ Feel free to switch modes at the top bar to **Developer Mode** for live code dif
     type: 'done',
     modelId,
     routedModel: modelId,
-    provider: 'Local Resilient Engine',
+    provider: 'Provider Diagnostics',
     tokens: {
       promptTokens: Math.round(prompt.length / 4),
       completionTokens: Math.round(fullResponse.length / 4),
       totalTokens: Math.round((prompt.length + fullResponse.length) / 4),
-      estimatedCostCredits: mode === 'developer' ? 2 : mode === 'researcher' ? 3 : 1,
+      estimatedCostCredits: 0,
     },
   });
 }

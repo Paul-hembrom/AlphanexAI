@@ -165,3 +165,202 @@ export function formatSerperResultsForGrounding(results: SerperSearchResult[]): 
     )
     .join('\n\n');
 }
+
+/**
+ * Checks whether a user prompt represents an actual research or search inquiry
+ * that warrants real-time Google search grounding via Serper.
+ *
+ * Conservative design:
+ * - Casual conversational inputs (greetings, single words, <4 words without question structure)
+ *   skip search entirely to avoid wasteful or nonsensical searches (e.g. searching for "hi").
+ * - False negatives (skipping a search that could have run) are strictly preferred over false positives.
+ */
+export function isResearchQuery(prompt: string): boolean {
+  if (!prompt || typeof prompt !== 'string') return false;
+
+  const trimmed = prompt.trim();
+  if (!trimmed) return false;
+
+  const lower = trimmed.toLowerCase();
+  // Strip common trailing punctuation for clean matching
+  const clean = lower.replace(/[!?,.:;]+$/g, '').trim();
+
+  // 1. Casual greetings, pleasantries, and small talk
+  const casualPhrases = new Set([
+    'hi',
+    'hello',
+    'hey',
+    'hey there',
+    'hi there',
+    'greetings',
+    'good morning',
+    'good afternoon',
+    'good evening',
+    'good night',
+    'howdy',
+    'sup',
+    "what's up",
+    'whats up',
+    'yo',
+    'namaste',
+    'hola',
+    'how are you',
+    'how are you doing',
+    "how's it going",
+    'hows it going',
+    'who are you',
+    'what are you',
+    'what can you do',
+    'help',
+    'test',
+    'testing',
+    'ping',
+    'pong',
+    'thanks',
+    'thank you',
+    'thx',
+    'ok',
+    'okay',
+    'cool',
+    'great',
+    'awesome',
+    'sure',
+    'yes',
+    'no',
+    'yep',
+    'nope',
+    'bye',
+    'goodbye',
+    'see you',
+  ]);
+
+  if (casualPhrases.has(clean)) {
+    return false;
+  }
+
+  // Tokenize words
+  const words = clean.split(/\s+/).filter(Boolean);
+  if (words.length === 0) return false;
+
+  // Explicit search directives that trigger a search
+  const searchDirectives = ['search', 'google', 'find', 'lookup', 'research', 'cite', 'sources'];
+  const startsWithSearchDirective =
+    searchDirectives.includes(words[0]) || (words.length >= 2 && words[0] === 'look' && words[1] === 'up');
+
+  // 2. Under 4 words constraint
+  if (words.length < 4) {
+    if (startsWithSearchDirective && words.length >= 2) {
+      return true; // e.g. "search nepal", "find gdp"
+    }
+
+    const hasQuestionMark = trimmed.includes('?');
+    const questionStarters = ['who', 'what', 'where', 'when', 'why', 'how', 'which', 'is', 'are', 'can', 'does', 'did', 'will'];
+    const startsWithQuestion = questionStarters.includes(words[0]);
+
+    // If starts with question word and has at least 3 words or explicit question mark (e.g. "what is gdp?", "who is pm?")
+    if (startsWithQuestion && (hasQuestionMark || words.length === 3)) {
+      // Exclude casual phrases
+      if (clean === 'who are you' || clean === 'how are you' || clean === 'what are you') {
+        return false;
+      }
+      return true;
+    }
+
+    // Check for explicit research/factual keywords or year in 2-3 word queries (e.g. "nepal gdp", "kathmandu traffic status")
+    const hasYear = /\b20[1-3][0-9]\b/.test(trimmed);
+    const hasStrongResearchKeyword = [
+      'gdp',
+      'inflation',
+      'census',
+      'budget',
+      'population',
+      'nepal',
+      'kathmandu',
+      'election',
+      'benchmark',
+      'traffic',
+      'weather',
+      'stocks',
+      'shares',
+    ].some((kw) => words.includes(kw));
+
+    if (words.length >= 2 && (hasYear || (hasStrongResearchKeyword && words.length >= 3))) {
+      return true;
+    }
+
+    // Otherwise, under 4 words without explicit question structure or search directive is skipped
+    return false;
+  }
+
+  // 3. 4 words or more:
+  const hasQuestionMark = trimmed.includes('?');
+  const interrogatives = ['who', 'what', 'where', 'when', 'why', 'how', 'which', 'whose', 'whom'];
+  const hasInterrogative = words.some((w) => interrogatives.includes(w));
+
+  const researchKeywords = [
+    'research',
+    'search',
+    'find',
+    'look up',
+    'lookup',
+    'investigate',
+    'analyze',
+    'analysis',
+    'report',
+    'study',
+    'studies',
+    'paper',
+    'papers',
+    'article',
+    'sources',
+    'source',
+    'cite',
+    'citation',
+    'citations',
+    'statistics',
+    'stats',
+    'data',
+    'metrics',
+    'rate',
+    'rates',
+    'gdp',
+    'inflation',
+    'population',
+    'latest',
+    'recent',
+    'current',
+    'news',
+    'history',
+    'historical',
+    'overview',
+    'explain',
+    'market',
+    'policy',
+    'regulation',
+    'government',
+    'infrastructure',
+    'nepal',
+    'kathmandu',
+    'benchmark',
+    'comparison',
+    'compare',
+    'difference between',
+    'timeline',
+  ];
+
+  const hasResearchKeyword = researchKeywords.some((kw) => lower.includes(kw));
+  const hasYear = /\b20[1-3][0-9]\b/.test(trimmed);
+
+  // If it has question structure, research keywords, year reference, or explicit search directive
+  if (hasQuestionMark || hasResearchKeyword || hasInterrogative || hasYear || startsWithSearchDirective) {
+    return true;
+  }
+
+  // If query is >= 6 words and not purely casual greetings
+  if (words.length >= 6) {
+    return true;
+  }
+
+  return false;
+}
+
