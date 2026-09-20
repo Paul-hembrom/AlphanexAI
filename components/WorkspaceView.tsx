@@ -24,9 +24,11 @@ import {
   UserProfileSettings,
   WebappBuildData,
   BuildStack,
+  BuildProgressStep,
 } from '@/lib/types';
 import {
   saveWebAppData,
+  saveWebAppPages,
   slugifyAppName,
   ACTIVE_APP_NAME_KEY,
   getPreviewUrl,
@@ -757,6 +759,29 @@ export default function WorkspaceView() {
                       : msg
                   )
                 );
+              } else if (data.type === 'build_progress') {
+                const newStep: BuildProgressStep = {
+                  id: `step-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                  step: data.step,
+                  file: data.file,
+                  message: data.message,
+                  timestamp: Date.now(),
+                };
+                setMessages((prev) =>
+                  prev.map((msg) =>
+                    msg.id === assistantMsgId
+                      ? {
+                          ...msg,
+                          buildSteps: [...(msg.buildSteps || []), newStep],
+                        }
+                      : msg
+                  )
+                );
+                broadcastTerminalLog({
+                  level: 'build',
+                  message: `[${(data.step || 'BUILD').toUpperCase()}] ${data.file || ''}: ${data.message}`,
+                  source: 'studio-builder',
+                });
               } else if (data.type === 'content') {
                 setMessages((prev) =>
                   prev.map((msg) =>
@@ -797,6 +822,7 @@ export default function WorkspaceView() {
                 const buildData: WebappBuildData = {
                   appName: (data.appName as string) || 'ecommerce-webapp',
                   html: (data.html as string) || '',
+                  pages: Array.isArray(data.pages) ? data.pages : undefined,
                   buildStatus: (data.buildStatus as any) || 'success',
                   stack: (data.stack as BuildStack) || selectedBuildStack,
                   testsPassed: typeof data.testsPassed === 'number' ? data.testsPassed : undefined,
@@ -822,6 +848,9 @@ export default function WorkspaceView() {
                 if (typeof window !== 'undefined' && buildData.html) {
                   const appSlug = slugifyAppName(buildData.appName);
                   saveWebAppData(appSlug, buildData.html);
+                  if (buildData.pages && buildData.pages.length > 0) {
+                    saveWebAppPages(appSlug, buildData.pages);
+                  }
                   localStorage.setItem(ACTIVE_APP_NAME_KEY, appSlug);
                   broadcastTerminalLog({
                     level: 'build',
@@ -839,7 +868,12 @@ export default function WorkspaceView() {
                   }
                   window.dispatchEvent(
                     new CustomEvent('alphanex-webapp-updated', {
-                      detail: { appName: appSlug, html: buildData.html, isHmr: true },
+                      detail: {
+                        appName: appSlug,
+                        html: buildData.html,
+                        pages: buildData.pages,
+                        isHmr: true,
+                      },
                     })
                   );
                 }

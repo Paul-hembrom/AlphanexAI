@@ -25,6 +25,9 @@ import {
 import {
   getWebAppData,
   saveWebAppData,
+  getWebAppPages,
+  saveWebAppPages,
+  type WebAppPage,
   getPreviewUrl,
   slugifyAppName,
   prepareHmrHtml,
@@ -41,7 +44,16 @@ type ViewportMode = 'desktop' | 'tablet' | 'mobile';
 export default function WebAppPreviewClient({ appName }: WebAppPreviewClientProps) {
   const cleanAppName = slugifyAppName(appName);
   const [viewport, setViewport] = useState<ViewportMode>('desktop');
-  const [htmlCode, setHtmlCode] = useState<string>(() => getWebAppData(cleanAppName).html);
+  const [pages, setPages] = useState<WebAppPage[]>(() => getWebAppPages(cleanAppName));
+  const [activePagePath, setActivePagePath] = useState<string>('index.html');
+  const [htmlCode, setHtmlCode] = useState<string>(() => {
+    const initialPages = getWebAppPages(cleanAppName);
+    if (initialPages && initialPages.length > 0) {
+      const idx = initialPages.find((p) => p.path === 'index.html') || initialPages[0];
+      return idx.html;
+    }
+    return getWebAppData(cleanAppName).html;
+  });
   const [iframeKey, setIframeKey] = useState<number>(0);
   const [autoRefreshEnabled, setAutoRefreshEnabled] = useState<boolean>(true);
   const [hmrStatus, setHmrStatus] = useState<'idle' | 'updating' | 'hot-updated'>('idle');
@@ -135,13 +147,29 @@ export default function WebAppPreviewClient({ appName }: WebAppPreviewClientProp
     const handleStorageChange = (e: StorageEvent) => {
       if (e.key === `alphanex_webapp_code_${cleanAppName}` && e.newValue) {
         applyHotModuleReplacement(e.newValue);
+      } else if (e.key === `alphanex_webapp_code_${cleanAppName}_pages` && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setPages(parsed);
+          }
+        } catch {}
       }
     };
 
     const handleCustomEvent = (e: Event) => {
       const ce = e as CustomEvent;
-      if (ce.detail?.appName === cleanAppName && ce.detail?.html) {
-        applyHotModuleReplacement(ce.detail.html);
+      if (ce.detail?.appName === cleanAppName) {
+        if (Array.isArray(ce.detail?.pages) && ce.detail.pages.length > 0) {
+          setPages(ce.detail.pages);
+          const current =
+            ce.detail.pages.find((p: WebAppPage) => p.path === activePagePath) ||
+            ce.detail.pages[0];
+          setActivePagePath(current.path);
+          applyHotModuleReplacement(current.html, true);
+        } else if (ce.detail?.html) {
+          applyHotModuleReplacement(ce.detail.html);
+        }
       }
     };
 
@@ -169,7 +197,7 @@ export default function WebAppPreviewClient({ appName }: WebAppPreviewClientProp
       window.removeEventListener('alphanex-webapp-updated', handleCustomEvent);
       if (bc) bc.close();
     };
-  }, [cleanAppName, applyHotModuleReplacement]);
+  }, [cleanAppName, applyHotModuleReplacement, activePagePath]);
 
   const previewUrl = typeof window !== 'undefined' ? window.location.href : getPreviewUrl(cleanAppName);
 
@@ -196,13 +224,27 @@ export default function WebAppPreviewClient({ appName }: WebAppPreviewClientProp
 
     try {
       const currentCode = htmlCode || getWebAppData(cleanAppName).html || DEFAULT_STARTER_WEBAPP_HTML;
+      const currentPages = pages.length > 0 ? pages : getWebAppPages(cleanAppName);
+
+      const deployPayload: {
+        appName: string;
+        html: string;
+        files?: Array<{ path: string; content: string }>;
+        pages?: WebAppPage[];
+      } = {
+        appName: cleanAppName,
+        html: currentCode,
+      };
+
+      if (currentPages && currentPages.length > 0) {
+        deployPayload.pages = currentPages;
+        deployPayload.files = currentPages.map((p) => ({ path: p.path, content: p.html }));
+      }
+
       const res = await fetch('/api/deploy', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          appName: cleanAppName,
-          html: currentCode,
-        }),
+        body: JSON.stringify(deployPayload),
       });
 
       const data = await res.json();
@@ -262,6 +304,13 @@ export default function WebAppPreviewClient({ appName }: WebAppPreviewClientProp
 
   const handleSaveCode = () => {
     saveWebAppData(cleanAppName, editableCode);
+    if (pages.length > 0) {
+      const updatedPages = pages.map((p) =>
+        p.path === activePagePath ? { ...p, html: editableCode } : p
+      );
+      setPages(updatedPages);
+      saveWebAppPages(cleanAppName, updatedPages);
+    }
     applyHotModuleReplacement(editableCode);
     setIsEditingCode(false);
   };
@@ -485,6 +534,46 @@ export default function WebAppPreviewClient({ appName }: WebAppPreviewClientProp
       <div className="flex-1 flex overflow-hidden relative">
         {/* Main Preview Screen */}
         <main className="flex-1 flex flex-col items-center justify-center p-2 sm:p-4 overflow-auto bg-[#ECE8E1]/50">
+          {/* Multi-Page Navigation Bar */}
+          {pages.length > 1 && (
+            <div
+              id="webapp-page-switcher"
+              className="w-full max-w-4xl mb-2.5 flex flex-wrap items-center justify-between gap-2.5 bg-white/95 backdrop-blur-xs px-3.5 py-2 rounded-xl border border-[#D5D0C7] text-xs shadow-2xs shrink-0"
+            >
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-bold text-[#1F1E1D] text-xs flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-blue-600" />
+                  <span>Pages ({pages.length}):</span>
+                </span>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {pages.map((p) => (
+                    <button
+                      key={p.path}
+                      id={`page-tab-${p.path.replace(/[^a-zA-Z0-9_-]/g, '-')}`}
+                      type="button"
+                      onClick={() => {
+                        setActivePagePath(p.path);
+                        setHtmlCode(p.html);
+                        setEditableCode(p.html);
+                        setIframeKey((prev) => prev + 1);
+                      }}
+                      className={`px-2.5 py-1 rounded-md font-mono text-[11px] transition-all cursor-pointer ${
+                        activePagePath === p.path
+                          ? 'bg-[#1F1E1D] text-white font-semibold shadow-xs'
+                          : 'bg-[#F3EFEA] text-[#55504A] hover:bg-[#EAE5DE]'
+                      }`}
+                    >
+                      {p.path}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <span className="text-[11px] text-[#736E67] italic hidden sm:inline">
+                Real in-page navigation links activate upon Vercel deployment
+              </span>
+            </div>
+          )}
+
           <div className={`transition-all duration-200 overflow-hidden bg-white ${getContainerStyle()}`}>
             <iframe
               key={iframeKey}

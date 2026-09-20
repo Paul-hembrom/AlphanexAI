@@ -11,6 +11,46 @@ export const DEFAULT_WEBAPP_NAME = 'your-app-name';
 export const WEBAPP_STORAGE_PREFIX = 'alphanex_webapp_code_';
 export const ACTIVE_APP_NAME_KEY = 'alphanex_active_app_name';
 
+export interface WebAppPage {
+  path: string;
+  html: string;
+}
+
+/**
+ * Persists multi-page web app structures in localStorage under ${WEBAPP_STORAGE_PREFIX}${slug}_pages
+ */
+export function saveWebAppPages(appName: string, pages: WebAppPage[]): void {
+  if (typeof window === 'undefined') return;
+  const slug = slugifyAppName(appName);
+  try {
+    localStorage.setItem(`${WEBAPP_STORAGE_PREFIX}${slug}_pages`, JSON.stringify(pages));
+  } catch (err) {
+    console.warn('Failed to save web app pages to localStorage:', err);
+  }
+}
+
+/**
+ * Retrieves multi-page web app structures from localStorage
+ */
+export function getWebAppPages(appName?: string): WebAppPage[] {
+  if (typeof window === 'undefined') return [];
+  const slug = appName
+    ? slugifyAppName(appName)
+    : localStorage.getItem(ACTIVE_APP_NAME_KEY) || DEFAULT_WEBAPP_NAME;
+  try {
+    const saved = localStorage.getItem(`${WEBAPP_STORAGE_PREFIX}${slug}_pages`);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed;
+      }
+    }
+  } catch (err) {
+    console.warn('Failed to read web app pages from localStorage:', err);
+  }
+  return [];
+}
+
 export function slugifyAppName(name: string): string {
   if (!name || !name.trim()) return DEFAULT_WEBAPP_NAME;
   const slug = name
@@ -221,6 +261,84 @@ export function ensureCompleteHtml(snippet: string): string {
   ${snippet}
 </body>
 </html>`;
+}
+
+/**
+ * Parses a model response containing multiple labeled files using the <!-- FILE: <filename.html> --> convention.
+ */
+export function extractMultiPageFilesFromMarkdown(text: string): WebAppPage[] {
+  if (!text || !text.trim()) return [];
+  const pages: WebAppPage[] = [];
+
+  // Match <!-- FILE: filename.html -->
+  const markerRegex = /<!--\s*FILE:\s*([a-zA-Z0-9_\-./]+)\s*-->/gi;
+  const markers: { path: string; index: number; length: number }[] = [];
+  let m: RegExpExecArray | null;
+
+  while ((m = markerRegex.exec(text)) !== null) {
+    let cleanPath = m[1].trim();
+    if (cleanPath.startsWith('/')) cleanPath = cleanPath.slice(1);
+    if (!cleanPath.includes('.')) cleanPath = `${cleanPath}.html`;
+    markers.push({
+      path: cleanPath,
+      index: m.index,
+      length: m[0].length,
+    });
+  }
+
+  if (markers.length > 0) {
+    for (let i = 0; i < markers.length; i++) {
+      const current = markers[i];
+      const start = current.index + current.length;
+      const end = i < markers.length - 1 ? markers[i + 1].index : text.length;
+      const segment = text.slice(start, end);
+
+      let htmlContent = '';
+      const codeBlockMatch = segment.match(/```(?:html|htm)?\s*([\s\S]*?)```/i);
+      if (codeBlockMatch && codeBlockMatch[1] && codeBlockMatch[1].trim().length > 10) {
+        htmlContent = codeBlockMatch[1].trim();
+      } else {
+        const docMatch = segment.match(/(<!DOCTYPE html[\s\S]*?<\/html>)/i);
+        if (docMatch && docMatch[1]) {
+          htmlContent = docMatch[1].trim();
+        } else {
+          const cleanSnippet = segment.replace(/```(?:html|htm)?/gi, '').replace(/```/g, '').trim();
+          if (cleanSnippet.length > 10) {
+            htmlContent = cleanSnippet;
+          }
+        }
+      }
+
+      if (htmlContent) {
+        pages.push({
+          path: current.path,
+          html: ensureCompleteHtml(htmlContent),
+        });
+      }
+    }
+  }
+
+  // Fallback: if no <!-- FILE: --> marker was found, or only 1 page extracted, inspect any code blocks containing inner markers
+  if (pages.length === 0) {
+    const codeBlockRegex = /```(?:html|htm)?\s*([\s\S]*?)```/gi;
+    let bMatch: RegExpExecArray | null;
+    let fallbackIndex = 1;
+    while ((bMatch = codeBlockRegex.exec(text)) !== null) {
+      const code = bMatch[1].trim();
+      if (code.length < 20) continue;
+      const innerMatch = code.match(/<!--\s*FILE:\s*([a-zA-Z0-9_\-./]+)\s*-->/i);
+      let pagePath = innerMatch ? innerMatch[1].trim() : (fallbackIndex === 1 ? 'index.html' : `page-${fallbackIndex}.html`);
+      if (pagePath.startsWith('/')) pagePath = pagePath.slice(1);
+      if (!pagePath.includes('.')) pagePath = `${pagePath}.html`;
+      pages.push({
+        path: pagePath,
+        html: ensureCompleteHtml(code),
+      });
+      fallbackIndex++;
+    }
+  }
+
+  return pages;
 }
 
 /**

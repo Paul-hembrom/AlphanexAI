@@ -51,6 +51,13 @@ export async function POST(
             modelId,
             stack: buildStack,
             settings: userSettings,
+            onProgress: (progress) =>
+              sendEvent({
+                type: 'build_progress',
+                step: progress.step,
+                file: progress.file,
+                message: progress.message,
+              }),
             onThinking: (thought) => sendEvent({ type: 'thinking', content: thought }),
           });
 
@@ -65,6 +72,7 @@ export async function POST(
             type: 'webapp_build',
             appName: buildResult.appName,
             html: buildResult.html,
+            pages: buildResult.pages,
             stack: buildResult.stack,
             buildStatus: buildResult.buildStatus,
             testsPassed: buildResult.testsPassed,

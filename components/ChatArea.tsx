@@ -18,6 +18,9 @@ import {
   FileCode2,
   CheckCircle2,
   Zap,
+  Clock,
+  Wrench,
+  Loader2,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import {
@@ -398,6 +401,59 @@ export default function ChatArea({
                             {message.thinkingContent || 'Synthesizing knowledge graph...'}
                           </div>
                         )}
+                      </div>
+                    )}
+
+                    {/* Structured Autonomous Build & Verification Checklist (Part D) */}
+                    {message.buildSteps && message.buildSteps.length > 0 && (
+                      <div
+                        id={`build-checklist-${message.id}`}
+                        className="rounded-xl border border-[#E0DCD4] bg-[#FAF8F5] p-3.5 space-y-2 text-xs shadow-2xs"
+                      >
+                        <div className="flex items-center justify-between border-b border-[#E8E4DC] pb-2">
+                          <div className="flex items-center gap-1.5 font-semibold text-[#1F1E1D]">
+                            <FileCode2 className="w-3.5 h-3.5 text-blue-600" />
+                            <span>Autonomous Sandbox Build Pipeline</span>
+                          </div>
+                          <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-[#ECE8E1] text-[#736E67]">
+                            {message.buildSteps.filter((s) => s.step === 'done' || s.message.startsWith('✓')).length}
+                            /{message.buildSteps.length} items
+                          </span>
+                        </div>
+                        <div className="space-y-1.5 pt-0.5">
+                          {message.buildSteps.map((step) => {
+                            const isDone = step.step === 'done' || step.message.startsWith('✓');
+                            const isRepair = step.step === 'repairing';
+                            const isChecking = step.step === 'checking';
+                            return (
+                              <div
+                                key={step.id}
+                                className="flex items-start gap-2 text-[11px] leading-tight"
+                              >
+                                {isDone ? (
+                                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" />
+                                ) : isRepair ? (
+                                  <Wrench className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5 animate-pulse" />
+                                ) : isChecking ? (
+                                  <Clock className="w-3.5 h-3.5 text-blue-500 shrink-0 mt-0.5 animate-spin" />
+                                ) : (
+                                  <Loader2 className="w-3.5 h-3.5 text-neutral-400 shrink-0 mt-0.5 animate-spin" />
+                                )}
+                                <span
+                                  className={`font-mono ${
+                                    isDone
+                                      ? 'text-[#2D2A26] font-medium'
+                                      : isRepair
+                                      ? 'text-amber-800 font-medium'
+                                      : 'text-[#635E57]'
+                                  }`}
+                                >
+                                  {step.message}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
                       </div>
                     )}
 

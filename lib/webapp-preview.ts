@@ -11,7 +11,11 @@ export {
   slugifyAppName,
   extractCodeFromMarkdown,
   ensureCompleteHtml,
+  saveWebAppPages,
+  getWebAppPages,
+  extractMultiPageFilesFromMarkdown,
 } from './webapp-shared';
+export type { WebAppPage } from './webapp-shared';
 
 import {
   DEFAULT_WEBAPP_NAME,

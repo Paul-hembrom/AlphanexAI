@@ -125,6 +125,7 @@ export type BuildStack = WebBuildStack | MobileBuildStack;
 export interface WebappBuildData {
   appName: string;
   html: string;
+  pages?: { path: string; html: string }[];
   buildStatus: 'success' | 'building' | 'failed';
   stack?: BuildStack;
   testsPassed?: number;
@@ -135,6 +136,14 @@ export interface WebappBuildData {
   verificationLog?: string[];
   attemptsMade?: number;
   repairIterations?: number;
+}
+
+export interface BuildProgressStep {
+  id: string;
+  step: 'generating' | 'checking' | 'repairing' | 'done';
+  file: string;
+  message: string;
+  timestamp: number;
 }
 
 export interface ChatMessage {
@@ -149,6 +158,7 @@ export interface ChatMessage {
   citations?: Citation[];
   diffData?: DiffData;
   webappBuild?: WebappBuildData;
+  buildSteps?: BuildProgressStep[];
   isThinking?: boolean;
   thinkingContent?: string;
   reasoningEffort?: ReasoningEffort;

@@ -10,10 +10,24 @@
  *    dumping raw code blocks, UNLESS the user explicitly requested code.
  */
 
-import { slugifyAppName, extractCodeFromMarkdown, ensureCompleteHtml, wrapGeneratedCodeAsPreviewHtml } from './webapp-shared';
+import {
+  slugifyAppName,
+  extractCodeFromMarkdown,
+  ensureCompleteHtml,
+  wrapGeneratedCodeAsPreviewHtml,
+  extractMultiPageFilesFromMarkdown,
+  DEFAULT_STARTER_WEBAPP_HTML,
+  type WebAppPage,
+} from './webapp-shared';
 import { BuildStack, UserProfileSettings, WebappBuildData } from './types';
 import { callOpenRouterCompletion, getOpenRouterApiKey } from './openrouter';
 import { runBuildCheckInSandbox } from './vercel-sandbox';
+
+export interface BuildProgressEvent {
+  step: 'generating' | 'checking' | 'repairing' | 'done';
+  file: string;
+  message: string;
+}
 
 export interface BuildOptions {
   prompt: string;
@@ -22,6 +36,7 @@ export interface BuildOptions {
   settings?: UserProfileSettings;
   openRouterApiKey?: string | null;
   onThinking?: (thought: string) => void;
+  onProgress?: (progress: BuildProgressEvent) => void;
   signal?: AbortSignal;
 }
 
@@ -29,6 +44,7 @@ export interface BuildResult {
   appName: string;
   appTitle: string;
   html: string;
+  pages?: { path: string; html: string }[];
   stack: BuildStack;
   testsPassed?: number;
   testsTotal?: number;
@@ -40,6 +56,48 @@ export interface BuildResult {
   rawCodeRequested: boolean;
   attemptsMade: number;
   repairIterations?: number;
+}
+
+/**
+ * Checks if the prompt indicates a multi-page website or document structure
+ */
+export function isMultiPagePrompt(prompt: string): boolean {
+  if (!prompt) return false;
+  const p = prompt.toLowerCase();
+  return (
+    p.includes('multi-page') ||
+    p.includes('multipage') ||
+    p.includes('multiple pages') ||
+    /\b[2-9]\s*pages\b/i.test(p) ||
+    /\b(?:two|three|four|five)\s*pages\b/i.test(p) ||
+    (p.includes('page') &&
+      (p.includes('about') ||
+        p.includes('contact') ||
+        p.includes('pricing') ||
+        p.includes('services') ||
+        p.includes('features') ||
+        p.includes('faq')))
+  );
+}
+
+/**
+ * Checks if the prompt indicates 3D, WebGL, or Three.js interactive graphics
+ */
+export function is3DPrompt(prompt: string): boolean {
+  if (!prompt) return false;
+  const p = prompt.toLowerCase();
+  return (
+    p.includes('3d') ||
+    p.includes('three.js') ||
+    p.includes('threejs') ||
+    p.includes('webgl') ||
+    p.includes('interactive scene') ||
+    p.includes('3d model') ||
+    p.includes('rotating 3d') ||
+    p.includes('3d viewer') ||
+    p.includes('mesh') ||
+    p.includes('particle scene')
+  );
 }
 
 /**
@@ -809,20 +867,66 @@ export async function buildApplicationFromPrompt(
   const appName = slugifyAppName(prompt.slice(0, 30)) || 'web-application';
   const appTitle = prompt.length > 50 ? `${prompt.slice(0, 50)}...` : prompt;
 
-  options.onThinking?.(`Analyzing requirements for ${appName} using stack [${stack}]...`);
+  const isMultiPage = stack === 'html-css-js' && isMultiPagePrompt(prompt);
+  const is3D = stack === 'html-css-js' && is3DPrompt(prompt);
+
+  const reportProgress = (
+    step: 'generating' | 'checking' | 'repairing' | 'done',
+    file: string,
+    message: string
+  ) => {
+    options.onProgress?.({ step, file, message });
+    options.onThinking?.(message);
+  };
+
+  reportProgress(
+    'generating',
+    isMultiPage ? 'multi-page-site' : 'index.html',
+    `Analyzing requirements for ${appName} using stack [${stack}]...`
+  );
 
   let filename = 'index.html';
   let stackInstruction = '';
 
   if (stack === 'html-css-js') {
     filename = 'index.html';
-    stackInstruction = `You MUST provide a single, complete, fully working HTML document.
+    if (isMultiPage) {
+      stackInstruction = `You MUST provide a complete multi-page website consisting of 2 to 5 separate HTML pages (e.g., index.html, about.html, contact.html).
+File Output Requirements:
+- Format EVERY page file prefixed with a comment marker on its own line:
+<!-- FILE: filename.html -->
+followed immediately by a markdown code block containing the complete HTML for that page:
+\`\`\`html
+<!DOCTYPE html>
+<html lang="en">
+...
+</html>
+\`\`\`
+- Always include "index.html" as the main home page.
+- Include consistent navigation links (<a href="index.html">Home</a>, <a href="about.html">About</a>, <a href="contact.html">Contact</a>) connecting all pages.
+- Use Tailwind CSS CDN (<script src="https://cdn.tailwindcss.com"></script>) and modern typography with cohesive styling across all pages.
+- Provide full, complete HTML and JS for each page — never truncate or leave placeholder stubs.`;
+    } else {
+      stackInstruction = `You MUST provide a single, complete, fully working HTML document.
 - Start with <!DOCTYPE html>.
 - Include <head> with Tailwind CSS CDN: <script src="https://cdn.tailwindcss.com"></script> and modern fonts.
 - Implement responsive, polished semantic markup with accessible styling.
 - Provide full, working Vanilla JavaScript inside a <script> tag for every interactive feature (buttons, filters, search, modal dialogs, calculators).
 - NEVER use pseudo-code, empty handler stubs, or TODO comments. Write real, executable JS with zero syntax errors.
 - Wrap the entire code in a single markdown code block: \`\`\`html ... \`\`\`.`;
+    }
+
+    if (is3D) {
+      stackInstruction += `
+
+3D & Interactive WebGL Requirements:
+- You may include Three.js from CDN: <script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
+- Set up a clean THREE.Scene, THREE.PerspectiveCamera, and THREE.WebGLRenderer attached to a dedicated <canvas> or full-bleed container.
+- Implement a complete requestAnimationFrame render loop with interactive features (such as mouse/touch movement, auto-rotation, or orbit controls).
+- Ensure the renderer and camera update dynamically on window resize (renderer.setSize, camera.aspect, camera.updateProjectionMatrix).
+- Add clean lighting (AmbientLight, DirectionalLight) and appropriate geometry/materials.
+- Ensure the HTML is 100% self-contained and immediately runnable.`;
+    }
   } else if (stack === 'react' || stack === 'nextjs') {
     filename = stack === 'react' ? 'App.tsx' : 'page.tsx';
     stackInstruction = `You MUST provide a complete, self-contained, working React application/component using Tailwind CSS.
@@ -849,7 +953,7 @@ export async function buildApplicationFromPrompt(
 - Wrap the entire code in a single markdown code block: \`\`\`dart ... \`\`\`.`;
   }
 
-  const systemPrompt = `You are a Principal Software Architect and Application Engineer at Google AI Studio.
+  const systemPrompt = `You are a Principal Software Architect and Application Engineer at Alphanex AI.
 Build a complete, production-ready application based on the user's prompt.
 Target Stack: ${stack}
 
@@ -860,20 +964,15 @@ Design Requirements:
 - Include complete business logic for the requested domain.
 - Provide a brief 2-3 sentence overview at the beginning, followed by the complete code block.`;
 
-function extractCleanCode(response: string, stack: BuildStack): string {
-  if (stack === 'html-css-js') {
-    const extracted = extractCodeFromMarkdown(response);
-    return extracted ? ensureCompleteHtml(extracted) : ensureCompleteHtml(response);
+  function extractCleanCode(response: string, targetStack: BuildStack): string {
+    if (targetStack === 'html-css-js') {
+      const extracted = extractCodeFromMarkdown(response);
+      return extracted ? ensureCompleteHtml(extracted) : ensureCompleteHtml(response);
+    }
+    const codeBlockRegex = /```(?:tsx|jsx|typescript|javascript|vue|dart)?\s*([\s\S]*?)```/i;
+    const match = response.match(codeBlockRegex);
+    return match && match[1] ? match[1].trim() : response.trim();
   }
-  const codeBlockRegex = /```(?:tsx|jsx|typescript|javascript|vue|dart)?\s*([\s\S]*?)```/i;
-  const match = response.match(codeBlockRegex);
-  return match && match[1] ? match[1].trim() : response.trim();
-}
-
-  const conversationHistory: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
-    { role: 'system', content: systemPrompt },
-    { role: 'user', content: prompt },
-  ];
 
   let currentCode = '';
   let modelResponse = '';
@@ -890,112 +989,269 @@ function extractCleanCode(response: string, stack: BuildStack): string {
   let attemptsMade = 0;
   let repairIterations = 0;
   const maxRepairIterations = 3;
+  let multiPages: WebAppPage[] | undefined = undefined;
 
-  // 1. Initial Generation via OpenRouter API
-  attemptsMade = 1;
-  options.onThinking?.(`Invoking OpenRouter API (${modelId}) to generate ${stack} code bundle...`);
-
-  try {
-    modelResponse = await callOpenRouterCompletion({
-      apiKey: options.openRouterApiKey,
-      modelId,
-      messages: conversationHistory,
-      temperature: 0.2,
-      maxTokens: 8192,
-    });
-    currentCode = extractCleanCode(modelResponse, stack);
-  } catch (err: unknown) {
-    const errorMsg = err instanceof Error ? err.message : String(err);
-    finalCheckResult = {
-      exitCode: 1,
-      stdout: '',
-      stderr: `OpenRouter API Generation Error: ${errorMsg}`,
-      passed: false,
-      checksRun: 1,
-      checksPassed: 0,
-      verificationLog: [`✗ OpenRouter API Generation Error: ${errorMsg}`],
-    };
-  }
-
-  // 2. Initial Sandbox Compilation & Lint Verification
-  if (currentCode) {
-    options.onThinking?.(`Running sandbox compilation check on generated ${filename}...`);
-    finalCheckResult = await runBuildCheckInSandbox(
-      [{ path: filename, content: currentCode }],
-      stack,
-      options.settings
-    );
-
-    if (finalCheckResult.passed) {
-      options.onThinking?.(`✓ Sandbox compilation succeeded on initial pass with 0 syntax errors.`);
-    }
-  }
-
-  // 3. Repair Loop: Feed back stderr / compiler errors for up to 3 repair iterations
-  while (!finalCheckResult.passed && repairIterations < maxRepairIterations) {
-    repairIterations++;
-    attemptsMade++;
-
-    const errorDetails =
-      finalCheckResult.stderr ||
-      finalCheckResult.verificationLog.filter((l) => l.startsWith('✗')).join('\n') ||
-      'Syntax or compilation check failed in sandbox.';
-
-    options.onThinking?.(
-      `Repair iteration #${repairIterations}/3: Sandbox detected error (${errorDetails.slice(0, 80)}...). Feeding back to model for auto-repair...`
-    );
-
-    conversationHistory.push({ role: 'assistant', content: modelResponse });
-    conversationHistory.push({
-      role: 'user',
-      content: `The generated code failed compilation / sandbox verification with this exact error:\n\`\`\`\n${errorDetails}\n\`\`\`\n\nPlease fix this error and return the complete, corrected code bundle inside a single markdown code block. Do NOT truncate or omit any parts of the code.`,
-    });
+  if (isMultiPage) {
+    // Multi-page workflow
+    attemptsMade = 1;
+    reportProgress('generating', 'multi-page-site', `Generating multi-page website via ${modelId}...`);
 
     try {
       modelResponse = await callOpenRouterCompletion({
         apiKey: options.openRouterApiKey,
         modelId,
-        messages: conversationHistory,
-        temperature: 0.1, // Lower temperature for surgical fix
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: prompt },
+        ],
+        temperature: 0.2,
         maxTokens: 8192,
       });
-      currentCode = extractCleanCode(modelResponse, stack);
+      let parsedPages = extractMultiPageFilesFromMarkdown(modelResponse);
+      if (parsedPages.length === 0) {
+        const singleCode = extractCleanCode(modelResponse, stack);
+        parsedPages = [{ path: 'index.html', html: singleCode }];
+      }
+      if (!parsedPages.some((p) => p.path === 'index.html')) {
+        parsedPages[0].path = 'index.html';
+      }
+      multiPages = parsedPages;
     } catch (err: unknown) {
       const errorMsg = err instanceof Error ? err.message : String(err);
       finalCheckResult = {
         exitCode: 1,
         stdout: '',
-        stderr: `OpenRouter API Repair Error (iteration ${repairIterations}): ${errorMsg}`,
+        stderr: `OpenRouter API Generation Error: ${errorMsg}`,
         passed: false,
-        checksRun: finalCheckResult.checksRun + 1,
-        checksPassed: finalCheckResult.checksPassed,
-        verificationLog: [
-          ...finalCheckResult.verificationLog,
-          `✗ Repair Iteration #${repairIterations} API Error: ${errorMsg}`,
-        ],
+        checksRun: 1,
+        checksPassed: 0,
+        verificationLog: [`✗ OpenRouter API Generation Error: ${errorMsg}`],
       };
-      break;
+      multiPages = [{ path: 'index.html', html: DEFAULT_STARTER_WEBAPP_HTML }];
     }
 
-    options.onThinking?.(
-      `Verifying repaired ${filename} in sandbox (repair iteration ${repairIterations}/${maxRepairIterations})...`
-    );
+    if (multiPages && multiPages.length > 0) {
+      for (const page of multiPages) {
+        reportProgress('generating', page.path, `✓ ${page.path} generated (${(page.html.length / 1024).toFixed(1)}kb)`);
+      }
 
-    finalCheckResult = await runBuildCheckInSandbox(
-      [{ path: filename, content: currentCode }],
-      stack,
-      options.settings
-    );
+      let allPassed = true;
+      for (let i = 0; i < multiPages.length; i++) {
+        const page = multiPages[i];
+        reportProgress('checking', page.path, `Checking ${page.path} in sandbox...`);
 
-    if (finalCheckResult.passed) {
-      options.onThinking?.(
-        `✓ Sandbox compilation succeeded on repair iteration #${repairIterations} with 0 syntax errors.`
+        let pageCheck = await runBuildCheckInSandbox(
+          [{ path: page.path, content: page.html }],
+          stack,
+          options.settings
+        );
+
+        let pageRepairs = 0;
+        while (!pageCheck.passed && pageRepairs < maxRepairIterations) {
+          pageRepairs++;
+          repairIterations++;
+          attemptsMade++;
+
+          const errorDetails =
+            pageCheck.stderr ||
+            pageCheck.verificationLog.filter((l) => l.startsWith('✗')).join('\n') ||
+            `Syntax check failed in ${page.path}`;
+
+          reportProgress(
+            'repairing',
+            page.path,
+            `Repair iteration #${pageRepairs}/3: Sandbox detected error in ${page.path}. Auto-repairing...`
+          );
+
+          // Flat context: system prompt, original user prompt, and MOST RECENT code + error pair
+          const repairMessages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: prompt },
+            { role: 'assistant', content: `<!-- FILE: ${page.path} -->\n\`\`\`html\n${page.html}\n\`\`\`` },
+            {
+              role: 'user',
+              content: `The file "${page.path}" failed compilation/sandbox verification with this exact error:\n\`\`\`\n${errorDetails}\n\`\`\`\n\nPlease fix this error for "${page.path}" and return the complete, corrected code for this page prefixed with <!-- FILE: ${page.path} --> inside a markdown code block. Do NOT truncate or omit any parts of the code.`,
+            },
+          ];
+
+          try {
+            const repairResponse = await callOpenRouterCompletion({
+              apiKey: options.openRouterApiKey,
+              modelId,
+              messages: repairMessages,
+              temperature: 0.1,
+              maxTokens: 8192,
+            });
+            const repairedPages = extractMultiPageFilesFromMarkdown(repairResponse);
+            const updatedCode =
+              repairedPages.find((p) => p.path === page.path)?.html ||
+              extractCleanCode(repairResponse, stack);
+            page.html = updatedCode;
+          } catch (repairErr: unknown) {
+            break;
+          }
+
+          reportProgress(
+            'checking',
+            page.path,
+            `Re-checking ${page.path} in sandbox (repair iteration ${pageRepairs}/${maxRepairIterations})...`
+          );
+
+          pageCheck = await runBuildCheckInSandbox(
+            [{ path: page.path, content: page.html }],
+            stack,
+            options.settings
+          );
+
+          if (pageCheck.passed) {
+            break;
+          }
+        }
+
+        finalCheckResult.checksRun += pageCheck.checksRun;
+        finalCheckResult.checksPassed += pageCheck.checksPassed;
+        finalCheckResult.verificationLog.push(...pageCheck.verificationLog);
+
+        if (pageCheck.passed) {
+          reportProgress('checking', page.path, `✓ Sandbox check passed for ${page.path}`);
+          reportProgress('done', page.path, `✓ ${page.path} verified and ready`);
+        } else {
+          allPassed = false;
+          finalCheckResult.passed = false;
+          finalCheckResult.stderr = pageCheck.stderr || `Check failed on ${page.path}`;
+          reportProgress('checking', page.path, `⚠️ Sandbox check unresolved for ${page.path}`);
+        }
+      }
+
+      if (allPassed) {
+        finalCheckResult.passed = true;
+        reportProgress('done', 'multi-page-site', `✓ All ${multiPages.length} pages verified and ready`);
+      }
+
+      currentCode = multiPages.find((p) => p.path === 'index.html')?.html || multiPages[0].html;
+    }
+  } else {
+    // Single-page workflow
+    attemptsMade = 1;
+    reportProgress('generating', filename, `Generating ${filename} via ${modelId}...`);
+
+    try {
+      modelResponse = await callOpenRouterCompletion({
+        apiKey: options.openRouterApiKey,
+        modelId,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: prompt },
+        ],
+        temperature: 0.2,
+        maxTokens: 8192,
+      });
+      currentCode = extractCleanCode(modelResponse, stack);
+      reportProgress('generating', filename, `✓ ${filename} generated (${(currentCode.length / 1024).toFixed(1)}kb)`);
+    } catch (err: unknown) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      finalCheckResult = {
+        exitCode: 1,
+        stdout: '',
+        stderr: `OpenRouter API Generation Error: ${errorMsg}`,
+        passed: false,
+        checksRun: 1,
+        checksPassed: 0,
+        verificationLog: [`✗ OpenRouter API Generation Error: ${errorMsg}`],
+      };
+    }
+
+    // Sandbox Compilation & Lint Verification
+    if (currentCode) {
+      reportProgress('checking', filename, `Checking ${filename} in sandbox...`);
+      finalCheckResult = await runBuildCheckInSandbox(
+        [{ path: filename, content: currentCode }],
+        stack,
+        options.settings
       );
-      break;
-    } else {
-      options.onThinking?.(
-        `⚠️ Sandbox check still failing on repair iteration #${repairIterations}: ${finalCheckResult.stderr.slice(0, 80)}`
+
+      if (finalCheckResult.passed) {
+        reportProgress('checking', filename, `✓ Sandbox check passed for ${filename}`);
+        reportProgress('done', filename, `✓ ${filename} verified and ready`);
+      }
+    }
+
+    // Repair Loop: Flat context across repair iterations
+    while (!finalCheckResult.passed && repairIterations < maxRepairIterations) {
+      repairIterations++;
+      attemptsMade++;
+
+      const errorDetails =
+        finalCheckResult.stderr ||
+        finalCheckResult.verificationLog.filter((l) => l.startsWith('✗')).join('\n') ||
+        'Syntax or compilation check failed in sandbox.';
+
+      reportProgress(
+        'repairing',
+        filename,
+        `Repair iteration #${repairIterations}/3: Sandbox detected error. Auto-repairing...`
       );
+
+      // Keep only system prompt, original user prompt, and MOST RECENT code + error pair
+      const repairMessages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: prompt },
+        { role: 'assistant', content: modelResponse },
+        {
+          role: 'user',
+          content: `The generated code failed compilation / sandbox verification with this exact error:\n\`\`\`\n${errorDetails}\n\`\`\`\n\nPlease fix this error and return the complete, corrected code bundle inside a single markdown code block. Do NOT truncate or omit any parts of the code.`,
+        },
+      ];
+
+      try {
+        modelResponse = await callOpenRouterCompletion({
+          apiKey: options.openRouterApiKey,
+          modelId,
+          messages: repairMessages,
+          temperature: 0.1,
+          maxTokens: 8192,
+        });
+        currentCode = extractCleanCode(modelResponse, stack);
+      } catch (err: unknown) {
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        finalCheckResult = {
+          exitCode: 1,
+          stdout: '',
+          stderr: `OpenRouter API Repair Error (iteration ${repairIterations}): ${errorMsg}`,
+          passed: false,
+          checksRun: finalCheckResult.checksRun + 1,
+          checksPassed: finalCheckResult.checksPassed,
+          verificationLog: [
+            ...finalCheckResult.verificationLog,
+            `✗ Repair Iteration #${repairIterations} API Error: ${errorMsg}`,
+          ],
+        };
+        break;
+      }
+
+      reportProgress(
+        'checking',
+        filename,
+        `Verifying repaired ${filename} in sandbox (iteration ${repairIterations}/${maxRepairIterations})...`
+      );
+
+      finalCheckResult = await runBuildCheckInSandbox(
+        [{ path: filename, content: currentCode }],
+        stack,
+        options.settings
+      );
+
+      if (finalCheckResult.passed) {
+        reportProgress('checking', filename, `✓ Sandbox check passed for ${filename}`);
+        reportProgress('done', filename, `✓ ${filename} verified and ready`);
+        break;
+      } else {
+        reportProgress(
+          'checking',
+          filename,
+          `⚠️ Sandbox check still failing on repair iteration #${repairIterations}: ${finalCheckResult.stderr.slice(0, 80)}`
+        );
+      }
     }
   }
 
@@ -1004,13 +1260,21 @@ function extractCleanCode(response: string, stack: BuildStack): string {
     `Target Stack: ${stack}`,
     `Frontier Model: ${modelId}`,
     `Sandbox Compiler Engine: ${options.settings?.codeExecutionEngine || 'cloud_sandbox'}`,
-    `Compiled Bundle: ${filename} (${currentCode.length} bytes)`,
+    `Compiled Bundle: ${isMultiPage && multiPages ? `${multiPages.length} files` : filename} (${currentCode.length} bytes)`,
     repairIterations > 0
       ? finalCheckResult.passed
         ? `Auto-Repair Loop: Resolved compilation issues after ${repairIterations} repair iteration(s)`
         : `Auto-Repair Loop: Failed after ${repairIterations} repair iteration(s)`
       : `Clean Pass: Compiled on initial attempt without syntax errors`,
   ];
+
+  if (isMultiPage && multiPages && multiPages.length > 1) {
+    features.push(`Multi-Page Architecture: ${multiPages.map((p) => p.path).join(', ')}`);
+  }
+
+  if (is3D) {
+    features.push('Interactive 3D: WebGL / Three.js scene initialized with responsive render loop');
+  }
 
   if (options.settings?.autoGeneratePrOnBugFix && repairIterations > 0) {
     features.push('Auto-Fix PR: Automated patch record queued for sandbox changes.');
@@ -1025,7 +1289,7 @@ Your application has been generated by the OpenRouter API, verified, and compile
 #### ⚡ Real Sandbox Compilation Results
 - **Status**: \`Build Succeeded (${attemptsMade} total pass${attemptsMade > 1 ? 'es' : ''}, ${repairIterations} repair iteration${repairIterations === 1 ? '' : 's'})\`
 - **Compiler Checks**: \`${finalCheckResult.checksPassed}/${finalCheckResult.checksRun} passed\`
-- **Syntax Exceptions**: \`0 bugs detected\`
+- **Syntax Exceptions**: \`${repairIterations > 0 ? `${repairIterations} issue(s) found and auto-repaired` : '0 issues — clean pass'}\`
 - **Stack**: \`${stack}\`
 
 #### 📦 Verified Architecture
@@ -1036,6 +1300,16 @@ ${
     ? '> **Live Preview Active:** The application is running in the interactive Web Preview sandbox on the right.'
     : '> **Source Ready:** Source code has been compiled and verified for mobile/framework export.'
 }`;
+
+    if (isMultiPage && multiPages && multiPages.length > 1) {
+      summaryMarkdown += `\n\n#### 📄 Generated Pages (${multiPages.length})\n${multiPages
+        .map((p) => `- \`${p.path}\` (${(p.html.length / 1024).toFixed(1)} KB)`)
+        .join('\n')}\n\n> **Multi-Page Navigation:** Switch between generated pages using the page selector tabs above the preview. Once deployed to Vercel, standard in-page navigation links (\`<a href="...">\`) will route directly between pages.`;
+    }
+
+    if (is3D) {
+      summaryMarkdown += `\n\n> **3D & WebGL Verification Note:** Sandbox verification for 3D content operates at the syntax and DOM check level (headless microVM sandboxes cannot render WebGL frames). Visual correctness, camera movement, and lighting are verified directly in the interactive live preview on the right.`;
+    }
   } else {
     summaryMarkdown = `### ⚠️ Compilation Warning: ${appTitle}
 
@@ -1057,19 +1331,41 @@ You can inspect the code below and adjust your prompt or fix the syntax directly
     summaryMarkdown += `\n\n#### Source Code (${filename})\n\`\`\`${lang}\n${currentCode}\n\`\`\``;
   }
 
-  const previewHtml =
-    finalCheckResult.passed && (stack === 'react' || stack === 'nextjs' || stack === 'vue')
-      ? wrapGeneratedCodeAsPreviewHtml(currentCode, stack)
-      : currentCode;
+  // Failed-build preview fallback
+  let previewHtml = currentCode;
+  if (stack === 'react' || stack === 'nextjs' || stack === 'vue') {
+    try {
+      previewHtml = wrapGeneratedCodeAsPreviewHtml(currentCode, stack);
+    } catch {
+      previewHtml = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Build Failed</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-neutral-900 text-neutral-100 p-6 font-mono text-sm">
+  <div class="max-w-xl mx-auto bg-neutral-800 border border-red-500/30 rounded-xl p-5 space-y-3 shadow-lg">
+    <div class="flex items-center gap-2 text-red-400 font-bold text-base">
+      <span>⚠️ Build Failed</span>
+    </div>
+    <p class="text-neutral-300 text-xs">Preview wrapping failed to compile the component. See build error output below.</p>
+    <pre class="bg-black/50 p-3 rounded text-red-300 text-xs overflow-x-auto whitespace-pre-wrap">${finalCheckResult.stderr || 'Compilation error'}</pre>
+  </div>
+</body>
+</html>`;
+    }
+  }
 
   return {
     appName,
     appTitle,
     html: previewHtml,
+    pages: multiPages && multiPages.length > 0 ? multiPages : undefined,
     stack,
     testsPassed: finalCheckResult.checksPassed,
     testsTotal: finalCheckResult.checksRun,
-    bugsFound: finalCheckResult.passed ? 0 : 1,
+    bugsFound: repairIterations,
     buildStatus,
     features,
     verificationLog: finalCheckResult.verificationLog,

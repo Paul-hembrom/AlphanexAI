@@ -1253,7 +1253,7 @@ captured
           <div className="flex-1 flex overflow-hidden relative">
             {/* Interactive Sandbox Screen */}
             <div className="flex-1 flex items-center justify-center p-3 overflow-auto bg-[#EFEBE4]/60">
-              {activeAppStack === 'html-css-js' ? (
+              {activeAppStack !== 'flutter' ? (
                 <div
                   className={`transition-all duration-200 overflow-hidden bg-white ${
                     previewViewport === 'mobile'

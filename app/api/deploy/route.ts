@@ -6,7 +6,7 @@ export const maxDuration = 500;
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { appName, html, files, action, domain } = body;
+    const { appName, html, files, pages, action, domain } = body;
 
     if (!appName) {
       return NextResponse.json(
@@ -43,6 +43,11 @@ export async function POST(req: NextRequest) {
 
     if (Array.isArray(files) && files.length > 0) {
       deployFiles = files;
+    } else if (Array.isArray(pages) && pages.length > 0) {
+      deployFiles = pages.map((p: { path?: string; html?: string }) => ({
+        path: p.path || 'index.html',
+        content: p.html || '',
+      }));
     } else if (html && typeof html === 'string') {
       deployFiles = [{ path: 'index.html', content: html }];
     } else {
