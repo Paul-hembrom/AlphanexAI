@@ -223,6 +223,8 @@ export interface BuildCheckResult {
   verificationLog: string[];
 }
 
+export type SandboxCheckResult = BuildCheckResult;
+
 /**
  * Runs a real sandbox compilation and syntax verification check on generated files.
  * Extracts scripts, runs node:vm or Vercel Sandbox node checks, validates HTML/JSX/Dart

@@ -21,6 +21,7 @@ import {
   Clock,
   Wrench,
   Loader2,
+  ClipboardList,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import {
@@ -425,6 +426,7 @@ export default function ChatArea({
                             const isDone = step.step === 'done' || step.message.startsWith('✓');
                             const isRepair = step.step === 'repairing';
                             const isChecking = step.step === 'checking';
+                            const isPlanned = step.step === 'planned';
                             return (
                               <div
                                 key={step.id}
@@ -436,6 +438,8 @@ export default function ChatArea({
                                   <Wrench className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5 animate-pulse" />
                                 ) : isChecking ? (
                                   <Clock className="w-3.5 h-3.5 text-blue-500 shrink-0 mt-0.5 animate-spin" />
+                                ) : isPlanned ? (
+                                  <ClipboardList className="w-3.5 h-3.5 text-indigo-500 shrink-0 mt-0.5" />
                                 ) : (
                                   <Loader2 className="w-3.5 h-3.5 text-neutral-400 shrink-0 mt-0.5 animate-spin" />
                                 )}
@@ -445,6 +449,8 @@ export default function ChatArea({
                                       ? 'text-[#2D2A26] font-medium'
                                       : isRepair
                                       ? 'text-amber-800 font-medium'
+                                      : isPlanned
+                                      ? 'text-indigo-900 font-medium'
                                       : 'text-[#635E57]'
                                   }`}
                                 >

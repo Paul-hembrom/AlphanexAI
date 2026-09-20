@@ -140,7 +140,7 @@ export interface WebappBuildData {
 
 export interface BuildProgressStep {
   id: string;
-  step: 'generating' | 'checking' | 'repairing' | 'done';
+  step: 'planned' | 'generating' | 'checking' | 'repairing' | 'done';
   file: string;
   message: string;
   timestamp: number;
