@@ -3,6 +3,11 @@ import { GoogleGenAI } from '@google/genai';
 import { Citation, DiffData, WorkMode } from '@/lib/types';
 import { getOpenRouterApiKey, streamOpenRouter } from '@/lib/openrouter';
 import { isAppBuildRequest, buildApplicationFromPrompt } from '@/lib/webapp-builder';
+import {
+  searchSerper,
+  serperResultsToCitations,
+  formatSerperResultsForGrounding,
+} from '@/lib/serper';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -102,6 +107,41 @@ export async function POST(
           return;
         }
 
+        // Researcher Mode: Perform real Serper search if SERPER_API_KEY is available
+        let serperCitations: Citation[] = [];
+        let baseSysInstruction =
+          params.systemInstruction ||
+          (mode === 'developer'
+            ? 'You are a Principal Software Engineer at AI Festa Studio Nepal. Write clean, production-ready code with concise explanations. If fixing code, include before and after snippets.'
+            : mode === 'researcher'
+            ? 'You are a Senior Tech Analyst and Academic Fellow specializing in Nepal and South Asia technology. Provide authoritative, deeply factual information with clear citations.'
+            : 'You are an intelligent reasoning assistant with warm, articulate explanations.');
+
+        if (mode === 'researcher') {
+          const serperKey = process.env.SERPER_API_KEY?.trim() || process.env.serper_api_key?.trim();
+          if (serperKey && serperKey !== 'MY_SERPER_API_KEY') {
+            try {
+              sendEvent({
+                type: 'thinking',
+                content: `Searching live web via Google Serper for: "${prompt.slice(0, 80)}"...`,
+              });
+              const serperHits = await searchSerper(prompt, { apiKey: serperKey, numResults: 5 });
+              if (serperHits.length > 0) {
+                serperCitations = serperResultsToCitations(serperHits);
+                const groundingContext = formatSerperResultsForGrounding(serperHits);
+
+                baseSysInstruction += `\n\n### Verified Real-Time Web Search Results (via Google Serper):\n${groundingContext}\n\nGrounding & Citation Directives:\n- Incorporate the above verified live search results directly into your research answer.\n- Use inline markdown links or bracketed citations referencing the exact source titles and publishers.\n- Prioritize verified current facts, dates, and metrics from these live search results over pre-trained general knowledge.`;
+
+                // Emit Serper citations to client UI so live citation chips display real search results
+                sendEvent({ type: 'citations', citations: serperCitations });
+              }
+            } catch (serperErr: any) {
+              console.warn('[Serper Search] Failed to retrieve live search results, falling back to Gemini grounding:', serperErr?.message || serperErr);
+            }
+          }
+        }
+        params.systemInstruction = baseSysInstruction;
+
         // Priority 1: OpenRouter Unified LLM Router with backend token capping
         const openRouterKey = getOpenRouterApiKey();
         if (openRouterKey) {
@@ -142,23 +182,16 @@ export async function POST(
               },
             });
 
-            // Build system instruction
-            const sysInstruction =
-              params.systemInstruction ||
-              (mode === 'developer'
-                ? 'You are a Principal Software Engineer at AI Festa Studio Nepal. Write clean, production-ready code with concise explanations. If fixing code, include before and after snippets.'
-                : mode === 'researcher'
-                ? 'You are a Senior Tech Analyst and Academic Fellow specializing in Nepal and South Asia technology. Provide authoritative, deeply factual information with clear citations.'
-                : 'You are an intelligent reasoning assistant with warm, articulate explanations.');
-
             // Config
             const config: Record<string, unknown> = {
-              systemInstruction: sysInstruction,
+              systemInstruction: baseSysInstruction,
               temperature: typeof params.temperature === 'number' ? params.temperature : 0.7,
               maxOutputTokens: typeof params.maxOutputTokens === 'number' ? Math.min(params.maxOutputTokens, 8192) : 4096,
             };
 
-            if (mode === 'researcher' || params.groundingEnabled) {
+            // If SERPER_API_KEY is missing or yielded no results, fall back to Gemini's native googleSearch grounding.
+            // If Serper provided results, Serper results are already in systemInstruction and emitted as citations.
+            if ((mode === 'researcher' && serperCitations.length === 0) || params.groundingEnabled) {
               config.tools = [{ googleSearch: {} }];
             }
 
@@ -194,20 +227,22 @@ export async function POST(
                 sendEvent({ type: 'content', content: text });
               }
 
-              // Extract grounding metadata citations if available
-              const groundingMetadata = (chunk as any).candidates?.[0]?.groundingMetadata;
-              if (groundingMetadata?.groundingChunks?.length) {
-                const citations: Citation[] = groundingMetadata.groundingChunks
-                  .slice(0, 4)
-                  .map((g: any, i: number) => ({
-                    id: `grounding-${i}`,
-                    sourceName: g.web?.title || 'Web Grounding Source',
-                    title: g.web?.title || 'Live Search Grounding',
-                    url: g.web?.uri || 'https://google.com',
-                    snippet: g.web?.snippet || 'Real-time verified web source citation.',
-                    reliabilityScore: 95,
-                  }));
-                sendEvent({ type: 'citations', citations });
+              // Extract grounding metadata citations if available and Serper citations were not already provided
+              if (serperCitations.length === 0) {
+                const groundingMetadata = (chunk as any).candidates?.[0]?.groundingMetadata;
+                if (groundingMetadata?.groundingChunks?.length) {
+                  const citations: Citation[] = groundingMetadata.groundingChunks
+                    .slice(0, 4)
+                    .map((g: any, i: number) => ({
+                      id: `grounding-${i}`,
+                      sourceName: g.web?.title || 'Web Grounding Source',
+                      title: g.web?.title || 'Live Search Grounding',
+                      url: g.web?.uri || 'https://google.com',
+                      snippet: g.web?.snippet || 'Real-time verified web source citation.',
+                      reliabilityScore: 95,
+                    }));
+                  sendEvent({ type: 'citations', citations });
+                }
               }
             }
 
@@ -268,7 +303,7 @@ export async function POST(
         }
 
         // Resilient intelligent simulator for frontier models and offline/rate-limited environments
-        await simulateStreamingResponse(mode, modelId, prompt, reasoningEffort, sendEvent);
+        await simulateStreamingResponse(mode, modelId, prompt, reasoningEffort, sendEvent, serperCitations);
         controller.close();
       } catch (err: any) {
         console.error('Chat stream error:', err);
@@ -301,7 +336,8 @@ async function simulateStreamingResponse(
   modelId: string,
   prompt: string,
   reasoningEffort: string,
-  sendEvent: (data: Record<string, unknown>) => void
+  sendEvent: (data: Record<string, unknown>) => void,
+  initialCitations: Citation[] = []
 ) {
   // Send routing confirmation
   sendEvent({
@@ -320,7 +356,7 @@ async function simulateStreamingResponse(
   await new Promise((r) => setTimeout(r, 200));
 
   let fullResponse = '> ⚠️ **Offline Fallback Notice**: Live model streaming requires an active `OPENROUTER_API_KEY` or `GEMINI_API_KEY`. Below is an offline developer reference.\n\n';
-  let citations: Citation[] | undefined = undefined;
+  let citations: Citation[] | undefined = initialCitations.length > 0 ? initialCitations : undefined;
   let diffData: DiffData | undefined = undefined;
 
   const promptLower = prompt.toLowerCase();
