@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   work_context TEXT DEFAULT 'Full-Stack Developer',
   github_username TEXT,
   institution_or_company TEXT,
-  plan_tier TEXT DEFAULT 'free',
+  plan_tier TEXT DEFAULT 'lite' CHECK (plan_tier IN ('lite', 'mid', 'upper')),
   created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
@@ -54,7 +54,7 @@ BEGIN
       NEW.raw_user_meta_data->>'picture',
       'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80'
     ),
-    'free'
+    'lite'
   )
   ON CONFLICT (id) DO UPDATE SET
     email = EXCLUDED.email,
@@ -72,20 +72,19 @@ CREATE TRIGGER on_auth_user_created
 
 -- 2. Subscription Plans Table
 CREATE TABLE IF NOT EXISTS public.subscription_plans (
-  id TEXT PRIMARY KEY,
+  tier TEXT PRIMARY KEY,
   name TEXT NOT NULL,
   monthly_token_limit BIGINT NOT NULL,
   max_concurrent_sessions INTEGER DEFAULT 2 NOT NULL,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
-INSERT INTO public.subscription_plans (id, name, monthly_token_limit, max_concurrent_sessions)
+INSERT INTO public.subscription_plans (tier, name, monthly_token_limit, max_concurrent_sessions)
 VALUES
-  ('free', 'Free Tier', 500000, 2),
-  ('starter', 'Starter Builder', 1500000, 4),
-  ('pro', 'Pro Builder', 5000000, 8),
-  ('enterprise', 'Enterprise', 50000000, 20)
-ON CONFLICT (id) DO UPDATE SET
+  ('lite', 'Lite Tier', 500000, 2),
+  ('mid', 'Mid Tier', 2500000, 5),
+  ('upper', 'Upper Tier', 10000000, 10)
+ON CONFLICT (tier) DO UPDATE SET
   name = EXCLUDED.name,
   monthly_token_limit = EXCLUDED.monthly_token_limit,
   max_concurrent_sessions = EXCLUDED.max_concurrent_sessions;
@@ -109,7 +108,7 @@ CREATE TABLE IF NOT EXISTS public.token_usage_log (
   prompt_tokens INTEGER NOT NULL DEFAULT 0,
   completion_tokens INTEGER NOT NULL DEFAULT 0,
   total_tokens INTEGER NOT NULL DEFAULT 0,
-  cost_credits INTEGER DEFAULT 0,
+  credits_charged INTEGER DEFAULT 0,
   mode TEXT,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );

@@ -39,7 +39,7 @@ export async function recordTokenUsage(params: TokenUsageParams): Promise<void> 
       prompt_tokens: Math.max(0, Math.round(params.promptTokens)),
       completion_tokens: Math.max(0, Math.round(params.completionTokens)),
       total_tokens: Math.max(0, Math.round(totalTokens)),
-      cost_credits: Math.max(0, Math.round(params.costCredits ?? 1)),
+      credits_charged: Math.max(0, Math.round(params.costCredits ?? 1)),
       mode: params.mode || 'developer',
     });
 
@@ -57,7 +57,7 @@ export async function recordTokenUsage(params: TokenUsageParams): Promise<void> 
 export async function checkPlanLimits(userId: string): Promise<PlanLimitCheckResult> {
   const fallbackResult: PlanLimitCheckResult = {
     allowed: true,
-    planTier: 'free',
+    planTier: 'lite',
     monthlyLimit: 500000,
     usedTokens: 0,
     activeSessions: 1,
@@ -78,13 +78,13 @@ export async function checkPlanLimits(userId: string): Promise<PlanLimitCheckRes
       .eq('id', userId)
       .maybeSingle();
 
-    const planTier = profile?.plan_tier || 'free';
+    const planTier = profile?.plan_tier || 'lite';
 
     // 2. Fetch subscription plan config
     const { data: plan } = await admin
       .from('subscription_plans')
       .select('monthly_token_limit, max_concurrent_sessions')
-      .eq('id', planTier)
+      .eq('tier', planTier)
       .maybeSingle();
 
     const monthlyLimit = Number(plan?.monthly_token_limit) || 500000;
