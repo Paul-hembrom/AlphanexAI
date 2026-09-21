@@ -217,7 +217,7 @@ export async function streamOpenRouter(options: StreamOpenRouterOptions): Promis
   // Build system instruction
   const defaultSystemInstruction =
     mode === 'developer'
-      ? 'You are a Principal Software Engineer at AI Festa Studio. Write clean, production-ready code with concise explanations. If fixing code, provide clear diffs.'
+      ? 'You are a Principal Software Engineer at Alphanex AI Studio. Write clean, production-ready code with concise explanations. If fixing code, provide clear diffs.'
       : mode === 'researcher'
       ? 'You are a Senior Tech Analyst and Research Fellow. Provide deeply factual, comprehensive analysis with clear citations and structured reasoning.'
       : 'You are an intelligent reasoning assistant delivering precise and helpful responses.';
@@ -259,7 +259,7 @@ export async function streamOpenRouter(options: StreamOpenRouterOptions): Promis
       Authorization: `Bearer ${apiKey}`,
       'Content-Type': 'application/json',
       'HTTP-Referer': appUrl,
-      'X-Title': 'AI Festa Studio',
+      'X-Title': 'Alphanex AI Studio',
     },
     body: JSON.stringify({
       model: targetModel,

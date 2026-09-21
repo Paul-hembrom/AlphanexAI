@@ -128,13 +128,13 @@ export default function SettingsModal({
           <div className="p-4 border-b border-[#EAE6DF] flex items-center justify-between">
             <div className="flex items-center gap-2">
               <div className="w-7 h-7 rounded-lg bg-[#1F1E1D] text-white flex items-center justify-center font-bold text-xs">
-                F
+                AN
               </div>
               <div>
                 <h2 id="settings-dialog-title" className="text-xs font-bold text-[#1F1E1D] tracking-tight">
                   Settings & Preferences
                 </h2>
-                <span className="text-[10px] text-[#858079] block">AI Festa Studio Nepal</span>
+                <span className="text-[10px] text-[#858079] block">Alphanex AI Studio</span>
               </div>
             </div>
 

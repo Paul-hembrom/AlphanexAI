@@ -143,7 +143,7 @@ export default function CanvasDrawer({
     customCodeSnippet || SAMPLE_PYTHON_SCRIPT
   );
   const [terminalOutput, setTerminalOutput] = useState<string>(
-    'AI Festa Studio In-Browser Python 3.12 (Pyodide WASM)\nReady. Press "Run Code" to execute.\n'
+    'Alphanex AI Studio In-Browser Python 3.12 (Pyodide WASM)\nReady. Press "Run Code" to execute.\n'
   );
   const [isRunningCode, setIsRunningCode] = useState(false);
   const [pyodideReady, setPyodideReady] = useState(false);
@@ -261,7 +261,7 @@ export default function CanvasDrawer({
 
   // General Mode State
   const [scratchpadText, setScratchpadText] = useState<string>(
-    '# AI Festa Studio Scratchpad\n\n- Project Concept & Objective:\n- Key Insights & Strategy:\n- Action Items for Nepal Tech Ecosystem:\n'
+    '# Alphanex AI Studio Scratchpad\n\n- Project Concept & Objective:\n- Key Insights & Strategy:\n- Action Items for Nepal Tech Ecosystem:\n'
   );
   const [copiedDoc, setCopiedDoc] = useState(false);
   const [copiedScratchpad, setCopiedScratchpad] = useState(false);
@@ -672,7 +672,7 @@ captured
       else if (tool === 'gdocs_list_documents') args = {};
       else if (tool === 'gdocs_create_brief')
         args = {
-          title: 'AI Festa Studio — Technical Brief',
+          title: 'Alphanex AI Studio — Technical Brief',
           content: currentDiff.explanation || 'Verified eSewa v2 signature implementation.',
         };
 
@@ -1696,7 +1696,7 @@ captured
               <button
                 type="button"
                 onClick={() =>
-                  setTerminalOutput('AI Festa Studio In-Browser Terminal cleared.\n')
+                  setTerminalOutput('Alphanex AI Studio In-Browser Terminal cleared.\n')
                 }
                 className="px-2 py-1 rounded bg-[#EFECE6] hover:bg-[#E5E2DC] text-[#736E67] hover:text-[#1F1E1D] text-xs font-medium flex items-center gap-1"
               >
@@ -2201,10 +2201,10 @@ captured
                 type="button"
                 disabled={isExportingGDocs}
                 onClick={() => {
-                  const briefText = `# AI Festa Studio — Executive Research Brief\n\n## Overview\nAuthoritative research synthesis grounded in verified Nepal & international sources.\n\n## Key Findings\n- Payment system interoperability is governed by Nepal Rastra Bank directives.\n- Test-time compute scaling enhances verification depth across multi-hop reasoning.\n- Open-weight models are driving high adoption across local software ecosystems.\n\n## Verified Bibliography\n${displayCitations
+                  const briefText = `# Alphanex AI Studio — Executive Research Brief\n\n## Overview\nAuthoritative research synthesis grounded in verified Nepal & international sources.\n\n## Key Findings\n- Payment system interoperability is governed by Nepal Rastra Bank directives.\n- Test-time compute scaling enhances verification depth across multi-hop reasoning.\n- Open-weight models are driving high adoption across local software ecosystems.\n\n## Verified Bibliography\n${displayCitations
                     .map((c, i) => `${i + 1}. ${c.title} — ${c.sourceName} (${c.url})`)
                     .join('\n')}`;
-                  handleExportToGoogleDocs('AI Festa Studio — Executive Research Brief', briefText);
+                  handleExportToGoogleDocs('Alphanex AI Studio — Executive Research Brief', briefText);
                 }}
                 className="px-2.5 py-1 rounded bg-blue-50 hover:bg-blue-100 text-blue-800 border border-blue-200 text-xs font-medium flex items-center gap-1 transition-colors cursor-pointer disabled:opacity-50"
                 title="Export Brief directly to Google Docs"
@@ -2220,7 +2220,7 @@ captured
               <button
                 type="button"
                 onClick={() => {
-                  const briefText = `# AI Festa Studio — Executive Research Brief\n\n## Overview\nAuthoritative research synthesis grounded in verified Nepal & international sources.\n\n## Key Findings\n- Payment system interoperability is governed by Nepal Rastra Bank directives.\n- Test-time compute scaling enhances verification depth across multi-hop reasoning.\n- Open-weight models are driving high adoption across local software ecosystems.\n\n## Verified Bibliography\n${displayCitations
+                  const briefText = `# Alphanex AI Studio — Executive Research Brief\n\n## Overview\nAuthoritative research synthesis grounded in verified Nepal & international sources.\n\n## Key Findings\n- Payment system interoperability is governed by Nepal Rastra Bank directives.\n- Test-time compute scaling enhances verification depth across multi-hop reasoning.\n- Open-weight models are driving high adoption across local software ecosystems.\n\n## Verified Bibliography\n${displayCitations
                     .map((c, i) => `${i + 1}. ${c.title} — ${c.sourceName} (${c.url})`)
                     .join('\n')}`;
                   navigator.clipboard.writeText(briefText);
@@ -2313,7 +2313,7 @@ captured
               <FileText className="w-4 h-4 text-amber-600" />
               <span className="font-semibold text-[#1F1E1D]">Document Canvas</span>
               <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#EFECE6] text-[#736E67]">
-                {(latestAssistantMessage || 'AI Festa Studio').split(/\s+/).filter(Boolean).length} Words
+                {(latestAssistantMessage || 'Alphanex AI Studio').split(/\s+/).filter(Boolean).length} Words
               </span>
             </div>
 
@@ -2376,7 +2376,7 @@ captured
               <button
                 type="button"
                 disabled={isExportingGDocs || !scratchpadText.trim()}
-                onClick={() => handleExportToGoogleDocs('AI Festa Studio — Scratchpad Notes', scratchpadText)}
+                onClick={() => handleExportToGoogleDocs('Alphanex AI Studio — Scratchpad Notes', scratchpadText)}
                 className="px-2 py-1 rounded bg-blue-50 hover:bg-blue-100 text-blue-800 border border-blue-200 text-xs font-medium flex items-center gap-1 transition-colors cursor-pointer disabled:opacity-50"
                 title="Export Scratchpad to Google Docs"
               >

@@ -138,7 +138,7 @@ export default function PaymentModal({
   ];
 
   const merchantPhone = '9801234567';
-  const merchantName = 'AI Festa Studio Nepal Pvt. Ltd.';
+  const merchantName = 'Alphanex AI Studio Pvt. Ltd.';
 
   const handleCopyMerchant = () => {
     navigator.clipboard.writeText(merchantPhone);

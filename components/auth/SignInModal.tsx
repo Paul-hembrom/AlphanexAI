@@ -8,9 +8,15 @@ interface SignInModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess?: () => void;
+  initialMode?: 'signin' | 'signup';
 }
 
-export default function SignInModal({ isOpen, onClose, onSuccess }: SignInModalProps) {
+export default function SignInModal({
+  isOpen,
+  onClose,
+  onSuccess,
+  initialMode = 'signin',
+}: SignInModalProps) {
   if (!isOpen) return null;
 
   return (
@@ -33,6 +39,8 @@ export default function SignInModal({ isOpen, onClose, onSuccess }: SignInModalP
         </button>
 
         <SignInCard
+          key={initialMode}
+          initialMode={initialMode}
           onSuccess={() => {
             onSuccess?.();
             onClose();

@@ -150,7 +150,7 @@ export async function executeGitHubAction(
             title: prTitle,
             head: featureBranch,
             base: targetBranch,
-            body: `${prBody}\n\n---\n*Auto-generated & verified by AI Festa Studio (${tokenSource}).*`,
+            body: `${prBody}\n\n---\n*Auto-generated & verified by Alphanex AI Studio (${tokenSource}).*`,
           }),
         });
 
@@ -384,7 +384,7 @@ export async function executeGoogleDocsAction(
     : 'None';
 
   if (action === 'create_brief') {
-    const title = (params.title as string) || 'AI Festa Studio — Technical Dossier';
+    const title = (params.title as string) || 'Alphanex AI Studio — Technical Dossier';
     const content = (params.content as string) || (params.bodyText as string) || '';
 
     // If live Google Docs OAuth token is available, create actual Google Doc
@@ -416,7 +416,7 @@ export async function executeGoogleDocsAction(
                   {
                     insertText: {
                       location: { index: 1 },
-                      text: `${content}\n\n---\nExported by AI Festa Studio Research Mode`,
+                      text: `${content}\n\n---\nExported by Alphanex AI Studio Research Mode`,
                     },
                   },
                 ],
@@ -510,7 +510,7 @@ export async function executeGoogleDocsAction(
         },
         {
           id: '3mN4oP5qR_ai_festa_guidelines',
-          title: 'AI Festa Studio Production Deployment Guidelines',
+          title: 'Alphanex AI Studio Production Deployment Guidelines',
           modifiedTime: new Date(Date.now() - 3600000 * 48).toISOString(),
           url: 'https://docs.google.com/document/d/3mN4oP5qR_ai_festa_guidelines/edit',
         },
@@ -602,7 +602,7 @@ export async function executeGmailAction(
     const subject = (params.subject as string) || 'Re: [Resolved] eSewa v2 HMAC Signature Mismatch';
     const body =
       (params.body as string) ||
-      'Hello team,\n\nWe have successfully verified and patched the HMAC-SHA256 signature verification according to eSewa EPAY v2 specifications.\n\nBest regards,\nAI Festa Studio Engineering';
+      'Hello team,\n\nWe have successfully verified and patched the HMAC-SHA256 signature verification according to eSewa EPAY v2 specifications.\n\nBest regards,\nAlphanex AI Studio Engineering';
 
     if (token) {
       try {
@@ -720,7 +720,7 @@ export async function executeGmailAction(
             id: 'msg_102',
             sender: 'lead-dev@nepal-devs.org',
             date: new Date(Date.now() - 3600000 * 1).toISOString(),
-            body: 'Investigating immediately with AI Festa Studio Developer Mode diff analyzer.',
+            body: 'Investigating immediately with Alphanex AI Studio Developer Mode diff analyzer.',
           },
         ],
       },

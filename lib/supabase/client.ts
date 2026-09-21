@@ -1,5 +1,4 @@
 import { createBrowserClient } from '@supabase/ssr';
-import type { SupabaseClient } from '@supabase/supabase-js';
 
 declare global {
   interface Window {
@@ -8,67 +7,50 @@ declare global {
   }
 }
 
-let runtimeConfig: { url: string; anonKey: string } | null = null;
-let browserClientInstance: SupabaseClient | null = null;
-
 export function setRuntimeSupabaseConfig(url: string, anonKey: string) {
-  if (url && anonKey && url.startsWith('http')) {
-    runtimeConfig = { url, anonKey };
-    if (typeof window !== 'undefined') {
-      window.__SUPABASE_PUBLIC_URL__ = url;
-      window.__SUPABASE_PUBLIC_ANON_KEY__ = anonKey;
-    }
-    browserClientInstance = null;
+  if (typeof window !== 'undefined') {
+    window.__SUPABASE_PUBLIC_URL__ = url;
+    window.__SUPABASE_PUBLIC_ANON_KEY__ = anonKey;
   }
 }
 
-export function getSupabasePublicConfig(): { url: string; anonKey: string } | null {
-  if (runtimeConfig) return runtimeConfig;
+export function getSupabaseConfig(): { url: string; anonKey: string } | null {
+  const url =
+    (typeof window !== 'undefined' && window.__SUPABASE_PUBLIC_URL__) ||
+    process.env.NEXT_PUBLIC_SUPABASE_URL ||
+    process.env.SUPABASE_PUBLIC_URL ||
+    '';
+  const anonKey =
+    (typeof window !== 'undefined' && window.__SUPABASE_PUBLIC_ANON_KEY__) ||
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+    process.env.SUPABASE_PUBLIC_ANON_KEY ||
+    '';
 
-  if (typeof window !== 'undefined') {
-    const url = window.__SUPABASE_PUBLIC_URL__;
-    const anonKey = window.__SUPABASE_PUBLIC_ANON_KEY__;
-    if (url && anonKey && url.startsWith('http')) {
-      runtimeConfig = { url, anonKey };
-      return runtimeConfig;
-    }
-  }
-
-  const url = process.env.SUPABASE_PUBLIC_URL || process.env.SUPABASE_URL;
-  const anonKey = process.env.SUPABASE_PUBLIC_ANON_KEY || process.env.SUPABASE_ANON_KEY;
   if (url && anonKey && url.startsWith('http')) {
-    runtimeConfig = { url, anonKey };
-    return runtimeConfig;
+    return { url, anonKey };
   }
-
   return null;
 }
 
 /**
- * Checks if Supabase client-side environment variables are available.
+ * Checks if Supabase client-side environment variables or runtime credentials are available.
  */
 export function isSupabaseConfigured(): boolean {
-  return getSupabasePublicConfig() !== null;
+  return !!getSupabaseConfig();
 }
 
 /**
  * Browser-side Supabase client for Next.js App Router Client Components.
- * Uses SUPABASE_PUBLIC_URL and SUPABASE_PUBLIC_ANON_KEY (no NEXT_ prefix required).
- * Handles cookie-based sessions, auth state synchronization, and RLS queries.
  */
-export function createClient(): SupabaseClient {
-  const config = getSupabasePublicConfig();
+export function createClient() {
+  const cfg = getSupabaseConfig();
 
-  if (!config) {
+  if (!cfg) {
     throw new Error(
-      'Supabase environment variables (SUPABASE_PUBLIC_URL and SUPABASE_PUBLIC_ANON_KEY) are missing or invalid.'
+      'Supabase configuration (SUPABASE_PUBLIC_URL and SUPABASE_PUBLIC_ANON_KEY) is missing or invalid.'
     );
   }
 
-  if (!browserClientInstance) {
-    browserClientInstance = createBrowserClient(config.url, config.anonKey);
-  }
-
-  return browserClientInstance;
+  return createBrowserClient(cfg.url, cfg.anonKey);
 }
 

@@ -262,7 +262,7 @@ export const AVAILABLE_MODELS: ModelInfo[] = [
 ];
 
 export const DEFAULT_SYSTEM_INSTRUCTIONS: Record<WorkMode, string> = {
-  developer: `You are a Principal Software Engineer and Polyglot Systems Architect at AI Festa Studio Nepal.
+  developer: `You are a Principal Software Engineer and Polyglot Systems Architect at Alphanex AI Studio.
 - Write modern, production-grade, bug-free code.
 - Prioritize clean architecture, error handling, and performance.
 - When fixing code, provide the exact changes suitable for side-by-side diffing and review.
@@ -273,7 +273,7 @@ export const DEFAULT_SYSTEM_INSTRUCTIONS: Record<WorkMode, string> = {
 - Provide source citations formatted with clear source badges (e.g. [OnlineKhabar], [Kantipur], [Arxiv], [NREN], [Nepal Rastra Bank]).
 - Evaluate technological and socio-economic implications with academic rigor.`,
 
-  general: `You are AI Festa Studio's intelligent reasoning polymath assistant.
+  general: `You are Alphanex AI Studio's intelligent reasoning polymath assistant.
 - Provide direct, thoughtful, and articulate responses with warm minimalist tone.
 - Break complex subjects into accessible, structured explanations.
 - Adapt tone dynamically to technical inquiries, conceptual drafting, or strategic planning.`,
@@ -393,7 +393,7 @@ def verify_esewa_signature(total_amount: str, transaction_uuid: str, product_cod
     return hmac.compare_digest(computed_signature, received_signature)`,
 };
 
-export const SAMPLE_PYTHON_SCRIPT = `# AI Festa Studio — In-Browser Python Terminal (Pyodide WASM)
+export const SAMPLE_PYTHON_SCRIPT = `# Alphanex AI Studio — In-Browser Python Terminal (Pyodide WASM)
 # Example: Nepali Currency Formatter & Fintech Tax Computation
 
 def format_nepali_currency(amount: float) -> str:

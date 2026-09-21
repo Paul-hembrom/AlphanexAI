@@ -1,6 +1,6 @@
 {
-  "name": "AI Festa Studio",
-  "description": "AlphanexAI: Frontier AI workspace and intelligence platform for developers and researchers, featuring multi-model reasoning, interactive canvas diffs, parameter studio, and grounded workflows.",
+  "name": "Alphanex AI Studio",
+  "description": "Alphanex AI Studio: Frontier AI workspace and intelligence platform for developers and researchers, featuring multi-model reasoning, interactive canvas diffs, parameter studio, and grounded workflows.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

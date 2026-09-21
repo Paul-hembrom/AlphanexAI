@@ -238,7 +238,7 @@ export default function ChatArea({
 
             <div className="space-y-2">
               <h2 className="text-2xl sm:text-3xl font-serif font-medium text-[#1F1E1D] tracking-tight">
-                Welcome to AI Festa Studio
+                Welcome to Alphanex AI Studio
               </h2>
               <p className="text-sm text-[#736E67] max-w-lg mx-auto leading-relaxed">
                 The premier workspace fusing Claude&apos;s warm minimalist design, Google AI Studio&apos;s

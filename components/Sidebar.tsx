@@ -315,7 +315,7 @@ export default function Sidebar({
 
   const handleExportMarkdown = (thread: ChatThread) => {
     let md = `# ${thread.title}\n\n`;
-    md += `*Created on ${new Date(thread.createdAt).toLocaleString()} via AI Festa Studio*\n\n---\n\n`;
+    md += `*Created on ${new Date(thread.createdAt).toLocaleString()} via Alphanex AI Studio*\n\n---\n\n`;
     thread.messages.forEach((msg) => {
       const roleName = msg.role === 'user' ? '👤 User' : `🤖 Assistant (${msg.modelId || 'Model'})`;
       md += `### ${roleName}\n\n${msg.content}\n\n`;
@@ -648,10 +648,10 @@ export default function Sidebar({
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <div className="w-6 h-6 rounded-md bg-[#1F1E1D] text-white flex items-center justify-center font-bold text-xs shadow-xs">
-                F
+                AN
               </div>
               <span className="text-xs font-bold text-[#1F1E1D] tracking-tight">
-                AI Festa Studio
+                Alphanex AI Studio
               </span>
               <span className="text-[9px] px-1 py-0.2 rounded font-medium bg-[#EFECE6] text-[#736E67]">
                 v2.5

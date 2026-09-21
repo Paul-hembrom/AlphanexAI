@@ -2,6 +2,9 @@
 
 import React, { useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { useAuth } from '@/lib/supabase/use-auth';
+import SignInModal from '@/components/auth/SignInModal';
 import {
   ArrowRight,
   ArrowUpRight,
@@ -29,10 +32,34 @@ import {
 import { AVAILABLE_MODELS } from '@/lib/constants';
 
 export default function HomePage() {
+  const router = useRouter();
+  const { user } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'developer' | 'researcher' | 'studio'>('developer');
   const [modelTierFilter, setModelTierFilter] = useState<'all' | 'free' | 'lite' | 'plus' | 'pro_max'>('all');
   const [showHomeSpecsModal, setShowHomeSpecsModal] = useState(false);
+  const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [authModalMode, setAuthModalMode] = useState<'signin' | 'signup'>('signin');
+
+  const handleTryAlphanex = (e?: React.MouseEvent) => {
+    if (e) e.preventDefault();
+    if (user) {
+      router.push('/workspace');
+    } else {
+      setAuthModalMode('signup');
+      setAuthModalOpen(true);
+    }
+  };
+
+  const handleLogIn = (e?: React.MouseEvent) => {
+    if (e) e.preventDefault();
+    if (user) {
+      router.push('/workspace');
+    } else {
+      setAuthModalMode('signin');
+      setAuthModalOpen(true);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-[#FBF9F5] text-[#1F1E1D] selection:bg-amber-200 selection:text-black antialiased font-sans">
@@ -85,22 +112,35 @@ export default function HomePage() {
 
           {/* Right: Section with Login & Try AlphanexAI CTA */}
           <div className="flex items-center gap-3">
-            <Link
-              href="/workspace"
-              className="hidden sm:inline-flex text-sm font-medium text-[#736E67] hover:text-[#1F1E1D] px-3 py-1.5 rounded-full hover:bg-[#EFECE6]/70 transition-colors"
-            >
-              Log in
-            </Link>
+            {user ? (
+              <Link
+                href="/workspace"
+                className="hidden sm:inline-flex items-center gap-1.5 text-xs font-semibold text-[#1F1E1D] px-3 py-1.5 rounded-full bg-[#EFECE6] hover:bg-[#E5E2DC] transition-colors"
+              >
+                <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                <span>Workspace</span>
+              </Link>
+            ) : (
+              <button
+                id="login-nav-btn"
+                type="button"
+                onClick={handleLogIn}
+                className="hidden sm:inline-flex text-sm font-medium text-[#736E67] hover:text-[#1F1E1D] px-3 py-1.5 rounded-full hover:bg-[#EFECE6]/70 transition-colors cursor-pointer"
+              >
+                Log in
+              </button>
+            )}
 
-            {/* Crucial CTA requested: "try AlphanexAI then it will redirect to this workspace" */}
-            <Link
+            {/* Crucial CTA requested: "Try AlphanexAI" */}
+            <button
               id="try-alphanex-nav-btn"
-              href="/workspace"
-              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-[#1F1E1D] hover:bg-black text-[#FBF9F5] text-xs sm:text-sm font-medium transition-all shadow-xs hover:shadow-md hover:scale-[1.02] active:scale-[0.98]"
+              type="button"
+              onClick={handleTryAlphanex}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-[#1F1E1D] hover:bg-black text-[#FBF9F5] text-xs sm:text-sm font-medium transition-all shadow-xs hover:shadow-md hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
             >
               <span>Try AlphanexAI</span>
               <ArrowUpRight className="w-3.5 h-3.5 text-amber-400" />
-            </Link>
+            </button>
 
             {/* Mobile menu button */}
             <button
@@ -153,12 +193,28 @@ export default function HomePage() {
               Pricing
             </a>
             <div className="pt-2 flex flex-col gap-2">
-              <Link
-                href="/workspace"
-                className="w-full text-center py-2.5 rounded-full bg-[#1F1E1D] text-[#FBF9F5] text-sm font-medium shadow-xs"
+              {!user && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMobileMenuOpen(false);
+                    handleLogIn();
+                  }}
+                  className="w-full text-center py-2.5 rounded-full border border-[#DDD8CE] bg-white text-[#1F1E1D] text-sm font-medium cursor-pointer"
+                >
+                  Log in
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  handleTryAlphanex();
+                }}
+                className="w-full text-center py-2.5 rounded-full bg-[#1F1E1D] text-[#FBF9F5] text-sm font-medium shadow-xs cursor-pointer"
               >
                 Try AlphanexAI &rarr;
-              </Link>
+              </button>
             </div>
           </div>
         )}
@@ -189,14 +245,15 @@ export default function HomePage() {
 
             {/* Call to Actions */}
             <div className="flex flex-wrap items-center gap-4">
-              <Link
+              <button
                 id="hero-try-alphanex-btn"
-                href="/workspace"
-                className="inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-full bg-[#1F1E1D] hover:bg-black text-[#FBF9F5] text-sm sm:text-base font-medium transition-all shadow-sm hover:shadow-lg hover:scale-[1.02] active:scale-[0.98]"
+                type="button"
+                onClick={handleTryAlphanex}
+                className="inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-full bg-[#1F1E1D] hover:bg-black text-[#FBF9F5] text-sm sm:text-base font-medium transition-all shadow-sm hover:shadow-lg hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
               >
                 <span>Try AlphanexAI</span>
                 <ArrowRight className="w-4 h-4 text-amber-400" />
-              </Link>
+              </button>
               <a
                 href="#capabilities"
                 className="inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-full bg-white hover:bg-[#F3EFEA] border border-[#DDD8CE] text-[#1F1E1D] text-sm sm:text-base font-medium transition-all shadow-2xs"
@@ -1004,13 +1061,14 @@ export default function HomePage() {
               </p>
             </div>
             <div className="shrink-0">
-              <Link
-                href="/workspace"
-                className="inline-flex items-center gap-2 px-6 py-3.5 rounded-full bg-white hover:bg-neutral-100 text-[#1F1E1D] font-bold text-sm sm:text-base transition-all shadow-md"
+              <button
+                type="button"
+                onClick={handleTryAlphanex}
+                className="inline-flex items-center gap-2 px-6 py-3.5 rounded-full bg-white hover:bg-neutral-100 text-[#1F1E1D] font-bold text-sm sm:text-base transition-all shadow-md cursor-pointer"
               >
                 <span>Try AlphanexAI Free</span>
                 <ArrowRight className="w-4 h-4 text-amber-600" />
-              </Link>
+              </button>
             </div>
           </div>
         </div>
@@ -1026,14 +1084,15 @@ export default function HomePage() {
             Begin with Qwen 3.8 Flash or DeepSeek V4 for free, explore Laguna S 2.1, GLM 5.3 & DeepSeek V4.1 in Lite, or unlock Gemini 3.8 Flash, GPT-6 Astra, and Claude Opus 5 with instant side-by-side diffing.
           </p>
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-            <Link
+            <button
               id="cta-bottom-try-btn"
-              href="/workspace"
-              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-8 py-4 rounded-full bg-[#1F1E1D] hover:bg-black text-[#FBF9F5] text-base font-semibold transition-all shadow-md hover:shadow-xl hover:scale-[1.02] active:scale-[0.98]"
+              type="button"
+              onClick={handleTryAlphanex}
+              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-8 py-4 rounded-full bg-[#1F1E1D] hover:bg-black text-[#FBF9F5] text-base font-semibold transition-all shadow-md hover:shadow-xl hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
             >
               <span>Try AlphanexAI</span>
               <ArrowRight className="w-4 h-4 text-amber-400" />
-            </Link>
+            </button>
             <Link
               href="/workspace"
               className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-8 py-4 rounded-full bg-white hover:bg-[#F3EFEA] border border-[#DDD8CE] text-[#1F1E1D] text-base font-semibold transition-all shadow-2xs"
@@ -1126,6 +1185,17 @@ export default function HomePage() {
           </div>
         </div>
       </footer>
+
+      {/* Real Supabase Authentication Modal with Sign In / Sign Up Google Auth */}
+      <SignInModal
+        isOpen={authModalOpen}
+        initialMode={authModalMode}
+        onClose={() => setAuthModalOpen(false)}
+        onSuccess={() => {
+          setAuthModalOpen(false);
+          router.push('/workspace');
+        }}
+      />
     </div>
   );
 }

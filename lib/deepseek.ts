@@ -26,7 +26,7 @@ export function getDeepSeekClient(): OpenAI {
       defaultHeaders: isOpenRouter
         ? {
             'HTTP-Referer': process.env.APP_URL || 'https://aistudio-build.local',
-            'X-Title': 'AI Festa Studio',
+            'X-Title': 'Alphanex AI Studio',
           }
         : undefined,
     });
