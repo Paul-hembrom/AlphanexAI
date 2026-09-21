@@ -41,6 +41,7 @@ import {
   getStoredBuildStack,
   setStoredBuildStack,
 } from '@/lib/webapp-preview';
+import { detectFileType } from '@/lib/code-detection';
 import {
   AVAILABLE_MODELS,
   INITIAL_WORKSPACE_PARAMS,
@@ -1040,6 +1041,17 @@ export default function WorkspaceView() {
   const handleOpenInCanvas = (diff?: DiffData, code?: string) => {
     if (diff) {
       setActiveDiffData(diff);
+    } else if (code) {
+      const detected = detectFileType('', code);
+      setActiveDiffData({
+        filename: `snippet${detected.extension || '.py'}`,
+        language: detected.id,
+        explanation: `Code snippet (${detected.name}) opened in Diff Canvas. Detected ${detected.indentation.indentGuide}.`,
+        additions: code.split('\n').length,
+        deletions: 0,
+        originalCode: code,
+        fixedCode: code,
+      });
     }
     if (code) {
       setCustomCodeSnippet(code);

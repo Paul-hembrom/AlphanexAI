@@ -39,6 +39,7 @@ import {
   ChatAttachment,
 } from '@/lib/types';
 import { SAMPLE_PROMPTS_BY_MODE, AVAILABLE_MODELS } from '@/lib/constants';
+import { detectFileType, tokenizeDiffLine } from '@/lib/code-detection';
 
 interface ChatAreaProps {
   messages: ChatMessage[];
@@ -560,14 +561,23 @@ export default function ChatArea({
                             const codeString = String(children).replace(/\n$/, '');
 
                             if (match) {
+                              const detected = detectFileType(match[1], codeString);
+                              const lines = codeString.split('\n');
+
                               return (
-                                <div className="my-3 rounded-xl border border-[#E5E2DC] overflow-hidden bg-[#1E1E1E] text-[#D4D4D4] shadow-sm">
-                                  {/* Code Block Header with Open in Canvas / View Diff */}
+                                <div className="my-3 rounded-xl border border-[#333333] overflow-hidden bg-[#1E1E1E] text-[#D4D4D4] shadow-sm">
+                                  {/* Code Block Header with File Type Detection & Open in Canvas / View Diff */}
                                   <div className="px-3 py-1.5 bg-[#252526] border-b border-[#333333] flex items-center justify-between text-xs text-[#CCCCCC]">
                                     <div className="flex items-center gap-2">
                                       <FileCode2 className="w-3.5 h-3.5 text-amber-400" />
-                                      <span className="font-mono text-[11px] font-medium text-[#E0E0E0]">
-                                        {match[1]}
+                                      <span className="font-mono text-[11px] font-semibold text-[#E0E0E0]">
+                                        {detected.name}
+                                      </span>
+                                      <span className="text-[10px] px-1.5 py-0.2 rounded bg-[#333333] text-[#A0A0A0] font-mono">
+                                        {detected.extension || `.${match[1]}`}
+                                      </span>
+                                      <span className="text-[10px] text-[#888888] font-mono hidden sm:inline">
+                                        {detected.indentation.indentGuide}
                                       </span>
                                     </div>
                                     <div className="flex items-center gap-1.5">
@@ -576,10 +586,21 @@ export default function ChatArea({
                                         <button
                                           type="button"
                                           onClick={() =>
-                                            onOpenInCanvas(message.diffData, codeString)
+                                            onOpenInCanvas(
+                                              message.diffData || {
+                                                filename: `snippet${detected.extension || '.py'}`,
+                                                language: detected.id,
+                                                explanation: `Code snippet (${detected.name}) opened in Diff Canvas.`,
+                                                additions: lines.length,
+                                                deletions: 0,
+                                                originalCode: codeString,
+                                                fixedCode: codeString,
+                                              },
+                                              codeString
+                                            )
                                           }
                                           className="px-2 py-0.5 rounded bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-medium flex items-center gap-1 transition-colors shadow-2xs"
-                                          title="Inspect side-by-side diff or run in Pyodide WASM Terminal"
+                                          title="Inspect in Code Diff Canvas with syntax highlighting and indentation rules"
                                         >
                                           <Code2 className="w-3 h-3" />
                                           <span>Open in Canvas / Diff</span>
@@ -598,9 +619,32 @@ export default function ChatArea({
                                       </button>
                                     </div>
                                   </div>
-                                  {/* Code Body */}
-                                  <pre className="p-3.5 overflow-x-auto text-xs font-mono leading-relaxed bg-[#1E1E1E]">
-                                    <code>{children}</code>
+                                  {/* Code Body with Syntax Highlighting and Indentation Rules */}
+                                  <pre
+                                    className="p-3.5 overflow-x-auto text-xs font-mono leading-relaxed bg-[#1E1E1E]"
+                                    style={{
+                                      tabSize: detected.indentation.tabSize,
+                                      MozTabSize: detected.indentation.tabSize,
+                                    }}
+                                  >
+                                    <code>
+                                      {lines.map((line, lIdx) => {
+                                        const tokens = tokenizeDiffLine(line, detected.prismLanguage);
+                                        return (
+                                          <div key={lIdx} className="leading-5">
+                                            {tokens.length > 0 ? (
+                                              tokens.map((tok, tIdx) => (
+                                                <span key={tIdx} style={{ color: tok.colorHex || '#D4D4D4' }}>
+                                                  {tok.content}
+                                                </span>
+                                              ))
+                                            ) : (
+                                              <span>&nbsp;</span>
+                                            )}
+                                          </div>
+                                        );
+                                      })}
+                                    </code>
                                   </pre>
                                 </div>
                               );

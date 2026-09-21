@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   X,
   Code2,
@@ -40,10 +40,22 @@ import {
   Tablet,
   Smartphone,
   Zap,
+  AlignLeft,
+  FileCode2,
+  Split,
+  Rows,
+  WrapText,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { DiffData, WorkMode, Citation, BuildStack } from '@/lib/types';
 import { INITIAL_DIFF_SAMPLE, SAMPLE_PYTHON_SCRIPT } from '@/lib/constants';
+import {
+  detectFileType,
+  tokenizeDiffLine,
+  getIndentationGuideStops,
+  HighlightToken,
+  FileTypeInfo,
+} from '@/lib/code-detection';
 import {
   getWebAppData,
   saveWebAppData,
@@ -133,10 +145,26 @@ export default function CanvasDrawer({
     return () => window.removeEventListener('alphanex-switch-canvas-tab', handleSwitchTab);
   }, []);
 
-  // Tab 1: Diff Viewer State
+  // Tab 1: Diff Viewer State with Automatic File Type Detection
   const currentDiff = propDiffData || INITIAL_DIFF_SAMPLE;
   const [acceptedFix, setAcceptedFix] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
+  const [diffViewMode, setDiffViewMode] = useState<'side-by-side' | 'unified'>('side-by-side');
+  const [showIndentGuides, setShowIndentGuides] = useState(true);
+  const [wrapLines, setWrapLines] = useState(false);
+  const [overrideTabSize, setOverrideTabSize] = useState<number | null>(null);
+
+  // Automatic file type detection based on file extension and content
+  const detectedFileType = useMemo(
+    () =>
+      detectFileType(
+        currentDiff.filename,
+        currentDiff.fixedCode || currentDiff.originalCode
+      ),
+    [currentDiff.filename, currentDiff.fixedCode, currentDiff.originalCode]
+  );
+
+  const activeTabSize = overrideTabSize ?? detectedFileType.indentation.tabSize;
 
   // Tab 2: Python WASM Terminal State
   const [pythonCode, setPythonCode] = useState<string>(
@@ -701,9 +729,134 @@ captured
   };
 
   // Helper to split diff into side by side lines
-  const originalLines = (currentDiff.originalCode || '').split('\n');
-  const fixedLines = (currentDiff.fixedCode || '').split('\n');
+  const originalLines = useMemo(
+    () => (currentDiff.originalCode || '').split('\n'),
+    [currentDiff.originalCode]
+  );
+  const fixedLines = useMemo(
+    () => (currentDiff.fixedCode || '').split('\n'),
+    [currentDiff.fixedCode]
+  );
   const maxLines = Math.max(originalLines.length, fixedLines.length);
+
+  // Pre-tokenize lines according to detected file type Prism language
+  const tokenizedOriginal = useMemo(
+    () => originalLines.map((line) => tokenizeDiffLine(line, detectedFileType.prismLanguage)),
+    [originalLines, detectedFileType.prismLanguage]
+  );
+  const tokenizedFixed = useMemo(
+    () => fixedLines.map((line) => tokenizeDiffLine(line, detectedFileType.prismLanguage)),
+    [fixedLines, detectedFileType.prismLanguage]
+  );
+
+  // Unified diff lines calculation
+  const unifiedDiffLines = useMemo(() => {
+    const lines: Array<{
+      type: 'context' | 'delete' | 'add';
+      oldLineNum?: number;
+      newLineNum?: number;
+      text: string;
+      tokens: HighlightToken[];
+    }> = [];
+    let oldIdx = 0;
+    let newIdx = 0;
+    const limit = Math.max(originalLines.length, fixedLines.length);
+
+    for (let i = 0; i < limit; i++) {
+      const orig = originalLines[i];
+      const fixed = fixedLines[i];
+
+      if (orig !== undefined && fixed !== undefined) {
+        if (orig === fixed) {
+          lines.push({
+            type: 'context',
+            oldLineNum: ++oldIdx,
+            newLineNum: ++newIdx,
+            text: orig,
+            tokens: tokenizedOriginal[i] || [{ type: 'plain', content: orig }],
+          });
+        } else {
+          lines.push({
+            type: 'delete',
+            oldLineNum: ++oldIdx,
+            text: orig,
+            tokens: tokenizedOriginal[i] || [{ type: 'plain', content: orig }],
+          });
+          lines.push({
+            type: 'add',
+            newLineNum: ++newIdx,
+            text: fixed,
+            tokens: tokenizedFixed[i] || [{ type: 'plain', content: fixed }],
+          });
+        }
+      } else if (orig !== undefined) {
+        lines.push({
+          type: 'delete',
+          oldLineNum: ++oldIdx,
+          text: orig,
+          tokens: tokenizedOriginal[i] || [{ type: 'plain', content: orig }],
+        });
+      } else if (fixed !== undefined) {
+        lines.push({
+          type: 'add',
+          newLineNum: ++newIdx,
+          text: fixed,
+          tokens: tokenizedFixed[i] || [{ type: 'plain', content: fixed }],
+        });
+      }
+    }
+    return lines;
+  }, [originalLines, fixedLines, tokenizedOriginal, tokenizedFixed]);
+
+  // Helper to render code line with syntax highlighted tokens and indentation guides
+  const renderCodeLine = (
+    tokens: HighlightToken[],
+    line: string,
+    tabSize: number,
+    showGuides: boolean
+  ) => {
+    if (!line && tokens.length === 0) {
+      return <span className="opacity-0 select-none">&nbsp;</span>;
+    }
+    const { guideStops } = getIndentationGuideStops(line, tabSize);
+
+    return (
+      <span
+        className="relative inline-block font-mono"
+        style={{
+          tabSize,
+          MozTabSize: tabSize,
+        }}
+      >
+        {/* Indentation Guidelines Overlay */}
+        {showGuides && guideStops > 0 && (
+          <span
+            aria-hidden="true"
+            className="select-none pointer-events-none absolute left-0 top-0 bottom-0 flex z-0"
+          >
+            {Array.from({ length: guideStops }).map((_, gIdx) => (
+              <span
+                key={gIdx}
+                className="inline-block border-l border-neutral-700/60 h-full"
+                style={{ width: `${tabSize}ch` }}
+              />
+            ))}
+          </span>
+        )}
+        {/* Tokenized Syntax Spans */}
+        <span className="relative z-1">
+          {tokens.map((token, tIdx) => (
+            <span
+              key={tIdx}
+              style={{ color: token.colorHex || '#D4D4D4' }}
+            >
+              {token.content}
+            </span>
+          ))}
+        </span>
+      </span>
+    );
+  };
 
   if (!isOpen) return null;
 
@@ -1519,22 +1672,117 @@ captured
       {/* Tab 1: Side-by-Side Monaco-Style Diff Viewer (Developer Mode Only) */}
       {currentMode === 'developer' && activeTab === 'diff' && (
         <div id="diff-viewer-content" className="flex-1 flex flex-col overflow-hidden">
-          {/* File Meta Header */}
-          <div className="px-4 py-2 bg-[#FAF8F3] border-b border-[#E5E2DC] flex items-center justify-between text-xs">
-            <div className="flex items-center gap-2">
-              <FileCode className="w-4 h-4 text-blue-600" />
-              <span className="font-mono font-semibold text-[#1F1E1D]">
+          {/* File Meta & Detection Header */}
+          <div className="px-4 py-2.5 bg-[#FAF8F3] border-b border-[#E5E2DC] flex flex-wrap items-center justify-between gap-2 text-xs">
+            <div className="flex flex-wrap items-center gap-2">
+              <FileCode className="w-4 h-4 text-blue-600 shrink-0" />
+              <span className="font-mono font-bold text-[#1F1E1D]">
                 {currentDiff.filename}
               </span>
-              <span className="text-[10px] px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-800 font-medium">
-                +{currentDiff.additions || 12}
-              </span>
-              <span className="text-[10px] px-1.5 py-0.2 rounded bg-red-100 text-red-800 font-medium">
-                -{currentDiff.deletions || 5}
-              </span>
+
+              {/* Automatic File Type Detection Badge */}
+              <div
+                className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-semibold border ${detectedFileType.badgeBg} ${detectedFileType.badgeText} ${detectedFileType.badgeBorder}`}
+                title={`Detected Language: ${detectedFileType.name} | Category: ${detectedFileType.category} | Extension: ${detectedFileType.extension || 'none'}`}
+              >
+                <span>{detectedFileType.name}</span>
+                <span className="text-[10px] opacity-75 font-mono">
+                  {detectedFileType.extension || 'detected'}
+                </span>
+              </div>
+
+              {/* Indentation Rules Badge & Controls */}
+              <div
+                className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-[#EFECE6] border border-[#DDD7CD] text-[#44403C] text-[11px]"
+                title={`Indentation Rule: ${detectedFileType.indentation.indentGuide} (${detectedFileType.indentation.useTabs ? 'Tab characters' : `${detectedFileType.indentation.tabSize} space characters`})`}
+              >
+                <AlignLeft className="w-3 h-3 text-[#78716C]" />
+                <span className="font-medium">
+                  {detectedFileType.indentation.useTabs ? 'Tabs' : `Spaces: ${activeTabSize}`}
+                </span>
+                <span className="text-[9px] text-[#78716C] font-mono hidden sm:inline">
+                  ({detectedFileType.indentation.indentGuide})
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setOverrideTabSize(activeTabSize === 2 ? 4 : activeTabSize === 4 ? 8 : 2)}
+                  className="text-[10px] text-blue-600 hover:text-blue-800 font-mono underline ml-0.5"
+                  title="Cycle Tab Size (2, 4, 8 spaces)"
+                >
+                  {activeTabSize === 2 ? '4' : activeTabSize === 4 ? '2' : '2'}sp
+                </button>
+              </div>
+
+              <div className="flex items-center gap-1">
+                <span className="text-[10px] px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-800 font-semibold font-mono">
+                  +{currentDiff.additions || 12}
+                </span>
+                <span className="text-[10px] px-1.5 py-0.2 rounded bg-red-100 text-red-800 font-semibold font-mono">
+                  -{currentDiff.deletions || 5}
+                </span>
+              </div>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5">
+              {/* Diff View Mode Toggle */}
+              <div className="flex items-center bg-[#E5E2DC] p-0.5 rounded">
+                <button
+                  type="button"
+                  onClick={() => setDiffViewMode('side-by-side')}
+                  className={`px-2 py-0.5 text-[11px] font-medium rounded flex items-center gap-1 transition-colors ${
+                    diffViewMode === 'side-by-side'
+                      ? 'bg-white text-[#1F1E1D] shadow-xs'
+                      : 'text-[#736E67] hover:text-[#1F1E1D]'
+                  }`}
+                  title="Side-by-Side Split View"
+                >
+                  <Split className="w-3 h-3" />
+                  <span className="hidden sm:inline">Split</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDiffViewMode('unified')}
+                  className={`px-2 py-0.5 text-[11px] font-medium rounded flex items-center gap-1 transition-colors ${
+                    diffViewMode === 'unified'
+                      ? 'bg-white text-[#1F1E1D] shadow-xs'
+                      : 'text-[#736E67] hover:text-[#1F1E1D]'
+                  }`}
+                  title="Unified Git Diff View"
+                >
+                  <Rows className="w-3 h-3" />
+                  <span className="hidden sm:inline">Unified</span>
+                </button>
+              </div>
+
+              {/* Guides Toggle */}
+              <button
+                type="button"
+                onClick={() => setShowIndentGuides(!showIndentGuides)}
+                className={`px-2 py-1 rounded text-xs font-medium flex items-center gap-1 transition-colors ${
+                  showIndentGuides
+                    ? 'bg-blue-100 text-blue-900 border border-blue-200'
+                    : 'bg-[#EFECE6] text-[#736E67] hover:text-[#1F1E1D]'
+                }`}
+                title={showIndentGuides ? 'Hide Indentation Guides' : 'Show Indentation Guides'}
+              >
+                <span>Guides</span>
+              </button>
+
+              {/* Wrap Toggle */}
+              <button
+                type="button"
+                onClick={() => setWrapLines(!wrapLines)}
+                className={`px-2 py-1 rounded text-xs font-medium flex items-center gap-1 transition-colors ${
+                  wrapLines
+                    ? 'bg-blue-100 text-blue-900 border border-blue-200'
+                    : 'bg-[#EFECE6] text-[#736E67] hover:text-[#1F1E1D]'
+                }`}
+                title={wrapLines ? 'Disable Line Wrap' : 'Enable Line Wrap'}
+              >
+                <WrapText className="w-3 h-3" />
+              </button>
+
+              {/* Copy Code */}
               <button
                 type="button"
                 onClick={() => handleCopyCode(currentDiff.fixedCode)}
@@ -1548,11 +1796,12 @@ captured
                 ) : (
                   <>
                     <Copy className="w-3 h-3" />
-                    <span>Copy Fixed</span>
+                    <span className="hidden sm:inline">Copy</span>
                   </>
                 )}
               </button>
 
+              {/* Accept Fix */}
               <button
                 type="button"
                 onClick={() => setAcceptedFix(true)}
@@ -1565,12 +1814,12 @@ captured
                 {acceptedFix ? (
                   <>
                     <Check className="w-3 h-3" />
-                    <span>Fix Accepted</span>
+                    <span>Applied</span>
                   </>
                 ) : (
                   <>
                     <ShieldCheck className="w-3 h-3" />
-                    <span>Accept Fix</span>
+                    <span>Accept</span>
                   </>
                 )}
               </button>
@@ -1581,98 +1830,202 @@ captured
           {currentDiff.explanation && (
             <div className="px-4 py-2 bg-blue-50/70 border-b border-blue-200/80 text-xs text-blue-900 leading-relaxed flex items-start gap-2">
               <Sparkles className="w-3.5 h-3.5 text-blue-700 shrink-0 mt-0.5" />
-              <p>{currentDiff.explanation}</p>
+              <div className="flex-1 flex flex-wrap items-center justify-between gap-1">
+                <p>{currentDiff.explanation}</p>
+                <span className="text-[10px] text-blue-700 font-mono bg-blue-100/80 px-1.5 py-0.5 rounded">
+                  Format: {detectedFileType.name} ({detectedFileType.indentation.indentGuide})
+                </span>
+              </div>
             </div>
           )}
 
-          {/* Side-by-Side Code Diff Grid */}
-          <div className="flex-1 overflow-y-auto bg-[#1E1E1E] text-[#D4D4D4] font-mono text-xs select-text">
-            {/* Split Headers */}
-            <div className="sticky top-0 grid grid-cols-2 bg-[#252526] border-b border-[#333333] text-[11px] font-sans font-medium text-[#AAAAAA] z-10">
-              <div className="px-3 py-1 border-r border-[#333333] flex items-center justify-between">
-                <span>Original (Buggy)</span>
-                <span className="text-red-400 font-mono">Red = Removed</span>
-              </div>
-              <div className="px-3 py-1 flex items-center justify-between">
-                <span>AI Fixed (Optimized)</span>
-                <span className="text-emerald-400 font-mono">Green = Added</span>
-              </div>
-            </div>
-
-            {/* Line by line render */}
-            <div className="divide-y divide-[#2A2A2A]">
-              {Array.from({ length: maxLines }).map((_, i) => {
-                const orig = originalLines[i] ?? '';
-                const fixed = fixedLines[i] ?? '';
-                const isDifferent = orig !== fixed;
-
-                return (
-                  <div key={i} className="grid grid-cols-2 min-h-[22px] group hover:bg-[#282828]">
-                    {/* Left: Original */}
-                    <div
-                      className={`flex border-r border-[#333333] overflow-x-hidden ${
-                        isDifferent && orig
-                          ? 'bg-red-950/40 text-red-200'
-                          : orig
-                          ? 'text-[#C5C5C5]'
-                          : 'bg-[#181818]'
-                      }`}
-                    >
-                      <span className="w-8 shrink-0 text-right pr-2 text-[#555555] select-none bg-[#202020]">
-                        {orig ? i + 1 : ''}
-                      </span>
-                      <span className="w-4 shrink-0 text-center select-none text-red-400 font-bold">
-                        {isDifferent && orig ? '-' : ''}
-                      </span>
-                      <span className="pl-1 pr-2 whitespace-pre overflow-x-auto">{orig}</span>
-                    </div>
-
-                    {/* Right: Fixed */}
-                    <div
-                      className={`flex overflow-x-hidden ${
-                        isDifferent && fixed
-                          ? 'bg-emerald-950/40 text-emerald-200'
-                          : fixed
-                          ? 'text-[#C5C5C5]'
-                          : 'bg-[#181818]'
-                      }`}
-                    >
-                      <span className="w-8 shrink-0 text-right pr-2 text-[#555555] select-none bg-[#202020]">
-                        {fixed ? i + 1 : ''}
-                      </span>
-                      <span className="w-4 shrink-0 text-center select-none text-emerald-400 font-bold">
-                        {isDifferent && fixed ? '+' : ''}
-                      </span>
-                      <span className="pl-1 pr-2 whitespace-pre overflow-x-auto">{fixed}</span>
-                    </div>
+          {/* Code Diff Canvas with Syntax Highlighting and Indentation Rules */}
+          <div
+            className="flex-1 overflow-y-auto bg-[#1E1E1E] text-[#D4D4D4] font-mono text-xs select-text"
+            style={{
+              tabSize: activeTabSize,
+              MozTabSize: activeTabSize,
+            }}
+          >
+            {diffViewMode === 'side-by-side' ? (
+              <>
+                {/* Split Headers */}
+                <div className="sticky top-0 grid grid-cols-2 bg-[#252526] border-b border-[#333333] text-[11px] font-sans font-medium text-[#AAAAAA] z-10">
+                  <div className="px-3 py-1.5 border-r border-[#333333] flex items-center justify-between">
+                    <span className="font-semibold text-neutral-300">Original (Buggy / Before)</span>
+                    <span className="text-red-400 font-mono text-[10px] bg-red-950/60 px-1.5 py-0.5 rounded">
+                      - Removed
+                    </span>
                   </div>
-                );
-              })}
-            </div>
+                  <div className="px-3 py-1.5 flex items-center justify-between">
+                    <span className="font-semibold text-neutral-300">AI Fixed (Optimized / After)</span>
+                    <span className="text-emerald-400 font-mono text-[10px] bg-emerald-950/60 px-1.5 py-0.5 rounded">
+                      + Added
+                    </span>
+                  </div>
+                </div>
+
+                {/* Line by line render */}
+                <div className="divide-y divide-[#282828]">
+                  {Array.from({ length: maxLines }).map((_, i) => {
+                    const orig = originalLines[i] ?? '';
+                    const fixed = fixedLines[i] ?? '';
+                    const isDifferent = orig !== fixed;
+                    const origTokens = tokenizedOriginal[i] || [];
+                    const fixedTokens = tokenizedFixed[i] || [];
+
+                    return (
+                      <div
+                        key={i}
+                        className="grid grid-cols-2 min-h-[22px] group hover:bg-[#252525] transition-colors"
+                      >
+                        {/* Left: Original */}
+                        <div
+                          className={`flex border-r border-[#333333] ${
+                            wrapLines ? 'break-all whitespace-pre-wrap' : 'overflow-x-hidden'
+                          } ${
+                            isDifferent && orig
+                              ? 'bg-red-950/35 border-l-2 border-red-500'
+                              : orig
+                              ? 'text-[#C5C5C5]'
+                              : 'bg-[#181818]'
+                          }`}
+                        >
+                          <span className="w-8 shrink-0 text-right pr-2 text-[#555555] select-none bg-[#202020]">
+                            {orig ? i + 1 : ''}
+                          </span>
+                          <span className="w-4 shrink-0 text-center select-none text-red-400 font-bold">
+                            {isDifferent && orig ? '-' : ''}
+                          </span>
+                          <div className={`pl-1 pr-2 ${wrapLines ? '' : 'whitespace-pre overflow-x-auto'}`}>
+                            {renderCodeLine(origTokens, orig, activeTabSize, showIndentGuides)}
+                          </div>
+                        </div>
+
+                        {/* Right: Fixed */}
+                        <div
+                          className={`flex ${
+                            wrapLines ? 'break-all whitespace-pre-wrap' : 'overflow-x-hidden'
+                          } ${
+                            isDifferent && fixed
+                              ? 'bg-emerald-950/35 border-l-2 border-emerald-500'
+                              : fixed
+                              ? 'text-[#C5C5C5]'
+                              : 'bg-[#181818]'
+                          }`}
+                        >
+                          <span className="w-8 shrink-0 text-right pr-2 text-[#555555] select-none bg-[#202020]">
+                            {fixed ? i + 1 : ''}
+                          </span>
+                          <span className="w-4 shrink-0 text-center select-none text-emerald-400 font-bold">
+                            {isDifferent && fixed ? '+' : ''}
+                          </span>
+                          <div className={`pl-1 pr-2 ${wrapLines ? '' : 'whitespace-pre overflow-x-auto'}`}>
+                            {renderCodeLine(fixedTokens, fixed, activeTabSize, showIndentGuides)}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            ) : (
+              /* Unified Git Patch View */
+              <>
+                <div className="sticky top-0 bg-[#252526] border-b border-[#333333] text-[11px] font-sans font-medium text-[#AAAAAA] z-10 px-3 py-1.5 flex items-center justify-between">
+                  <span className="font-semibold text-neutral-300">Unified Diff Patch ({detectedFileType.name})</span>
+                  <div className="flex items-center gap-2 text-[10px] font-mono">
+                    <span className="text-red-400 bg-red-950/60 px-1.5 py-0.5 rounded">- Original</span>
+                    <span className="text-emerald-400 bg-emerald-950/60 px-1.5 py-0.5 rounded">+ Fixed</span>
+                  </div>
+                </div>
+
+                <div className="divide-y divide-[#262626]">
+                  {unifiedDiffLines.map((line, idx) => {
+                    const isDelete = line.type === 'delete';
+                    const isAdd = line.type === 'add';
+
+                    return (
+                      <div
+                        key={idx}
+                        className={`flex min-h-[22px] group hover:bg-[#252525] transition-colors ${
+                          isDelete
+                            ? 'bg-red-950/35 border-l-2 border-red-500'
+                            : isAdd
+                            ? 'bg-emerald-950/35 border-l-2 border-emerald-500'
+                            : 'text-[#C5C5C5]'
+                        }`}
+                      >
+                        {/* Old line number */}
+                        <span className="w-8 shrink-0 text-right pr-2 text-[#555555] select-none bg-[#202020]">
+                          {line.oldLineNum ?? ''}
+                        </span>
+                        {/* New line number */}
+                        <span className="w-8 shrink-0 text-right pr-2 text-[#555555] select-none bg-[#202020]">
+                          {line.newLineNum ?? ''}
+                        </span>
+                        {/* Diff Indicator */}
+                        <span
+                          className={`w-4 shrink-0 text-center select-none font-bold ${
+                            isDelete ? 'text-red-400' : isAdd ? 'text-emerald-400' : 'text-[#444444]'
+                          }`}
+                        >
+                          {isDelete ? '-' : isAdd ? '+' : ' '}
+                        </span>
+                        {/* Code Content */}
+                        <div
+                          className={`pl-1 pr-2 ${
+                            wrapLines ? 'break-all whitespace-pre-wrap' : 'whitespace-pre overflow-x-auto'
+                          }`}
+                        >
+                          {renderCodeLine(line.tokens, line.text, activeTabSize, showIndentGuides)}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            )}
           </div>
 
-          {/* Diff Bottom Action Bar */}
-          <div className="p-3 bg-[#FAF8F3] border-t border-[#E5E2DC] flex items-center justify-between text-xs">
-            <button
-              type="button"
-              onClick={() => {
-                setPythonCode(currentDiff.fixedCode);
-                setActiveTab('terminal');
-              }}
-              className="text-xs text-amber-800 hover:text-amber-900 font-medium flex items-center gap-1"
-            >
-              <Terminal className="w-3.5 h-3.5" />
-              <span>Test Fixed Code in Pyodide WASM &rarr;</span>
-            </button>
+          {/* Diff Bottom Action Bar with Diagnostics */}
+          <div className="p-3 bg-[#FAF8F3] border-t border-[#E5E2DC] flex flex-wrap items-center justify-between gap-2 text-xs">
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setPythonCode(currentDiff.fixedCode);
+                  setActiveTab('terminal');
+                }}
+                className="text-xs text-amber-800 hover:text-amber-900 font-medium flex items-center gap-1"
+              >
+                <Terminal className="w-3.5 h-3.5" />
+                <span>
+                  {detectedFileType.id === 'python'
+                    ? 'Test Fixed Code in Pyodide WASM \u2192'
+                    : 'Send Code to Terminal \u2192'}
+                </span>
+              </button>
 
-            <button
-              type="button"
-              onClick={() => setActiveTab('github')}
-              className="text-xs text-purple-700 hover:text-purple-800 font-semibold flex items-center gap-1"
-            >
-              <GitPullRequest className="w-3.5 h-3.5" />
-              <span>Prepare GitHub PR &rarr;</span>
-            </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('github')}
+                className="text-xs text-purple-700 hover:text-purple-800 font-semibold flex items-center gap-1"
+              >
+                <GitPullRequest className="w-3.5 h-3.5" />
+                <span>Prepare GitHub PR \u2192</span>
+              </button>
+            </div>
+
+            {/* Syntax and indentation status pill */}
+            <div className="text-[11px] text-[#78716C] font-mono flex items-center gap-2">
+              <span className="flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                <span>Syntax: Prism ({detectedFileType.prismLanguage})</span>
+              </span>
+              <span>&bull;</span>
+              <span>Rule: {detectedFileType.indentation.indentGuide}</span>
+            </div>
           </div>
         </div>
       )}
