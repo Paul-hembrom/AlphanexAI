@@ -8,7 +8,7 @@ interface SignInModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess?: () => void;
-  initialMode?: 'signin' | 'signup';
+  initialMode?: 'signin' | 'signup' | 'forgot_password';
 }
 
 export default function SignInModal({
