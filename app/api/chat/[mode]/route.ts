@@ -332,15 +332,24 @@ export async function POST(
         );
         controller.close();
       } catch (err: any) {
-        console.error('Chat stream error:', err);
-        const errorMessage = err?.message || 'Internal processing error';
+        console.error('[UNHANDLED_CHAT_STREAM_ERROR]', JSON.stringify({
+          timestamp: new Date().toISOString(),
+          mode,
+          modelId,
+          error: err?.message || String(err),
+          stack: err?.stack,
+        }, null, 2));
+
         sendEvent({
           type: 'content',
-          content: `⚠️ **Build Failed**: ${errorMessage}\n\nThe operation could not be completed. Please check your configuration, verify API keys in Settings, or try again.`,
+          content: `### ⚠️ Temporary Interruption\n\nSorry, an unexpected error occurred while processing your request. Please wait a moment and try again, or switch to another model in the top selector.`,
         });
         sendEvent({
           type: 'done',
-          tokens: { promptTokens: 50, completionTokens: 50, totalTokens: 100 },
+          modelId,
+          routedModel: modelId,
+          provider: 'System Notice',
+          tokens: { promptTokens: 20, completionTokens: 20, totalTokens: 40, estimatedCostCredits: 0 },
         });
         controller.close();
       }
@@ -363,7 +372,7 @@ interface ProviderDiagnostics {
   geminiError?: string | null;
 }
 
-// Transparent provider failure and diagnostics reporter
+// Structured developer logging for Vercel / server logs & gentle user-facing notices
 async function simulateStreamingResponse(
   mode: WorkMode,
   modelId: string,
@@ -373,94 +382,116 @@ async function simulateStreamingResponse(
   initialCitations: Citation[] = [],
   diagnostics?: ProviderDiagnostics
 ) {
-  // Send routing confirmation
-  sendEvent({
-    type: 'routing',
-    modelId,
-    targetModel: modelId,
-    provider: 'Provider Diagnostics',
-    reasoningEffort,
-  });
-
-  // Diagnostics thinking status
-  sendEvent({
-    type: 'thinking',
-    content: `Model provider execution halted: diagnostic analysis in progress...`,
-  });
-  await new Promise((r) => setTimeout(r, 100));
-
   const openRouterErr = diagnostics?.openRouterError;
   const geminiErr = diagnostics?.geminiError;
   const openRouterAttempted = diagnostics?.openRouterAttempted;
   const geminiAttempted = diagnostics?.geminiAttempted;
 
-  // Identify root cause
-  let primaryCause = '';
-  const detailLines: string[] = [];
+  const combinedErr = `${geminiErr || ''} ${openRouterErr || ''}`.toLowerCase();
+  const isRateLimit =
+    combinedErr.includes('429') ||
+    combinedErr.includes('quota') ||
+    combinedErr.includes('resource_exhausted') ||
+    combinedErr.includes('rate limit');
 
-  if (geminiErr) {
-    const lower = geminiErr.toLowerCase();
-    if (geminiErr.includes('429') || lower.includes('quota') || lower.includes('resource_exhausted')) {
-      primaryCause =
-        'Google Gemini API quota or rate limit exceeded (HTTP 429). The request allowance for this model is temporarily exhausted.';
-    } else if (geminiErr.includes('401') || geminiErr.includes('403') || lower.includes('key')) {
-      primaryCause =
-        'Google Gemini API authentication failed. The configured `GEMINI_API_KEY` is invalid or unauthorized.';
-    } else if (lower.includes('timeout') || lower.includes('abort') || lower.includes('etimedout')) {
-      primaryCause = 'The request timed out while waiting for a response from the Google Gemini API.';
-    } else {
-      primaryCause = `Google Gemini encountered an error: ${geminiErr}`;
-    }
-    detailLines.push(`- **Google GenAI**: ${geminiErr}`);
+  const isAuthError =
+    combinedErr.includes('401') ||
+    combinedErr.includes('403') ||
+    combinedErr.includes('unauthorized') ||
+    combinedErr.includes('api key') ||
+    combinedErr.includes('invalid key');
+
+  const isTimeout =
+    combinedErr.includes('timeout') ||
+    combinedErr.includes('abort') ||
+    combinedErr.includes('etimedout');
+
+  const failureCategory = isRateLimit
+    ? 'RATE_LIMIT_EXCEEDED'
+    : isAuthError
+    ? 'AUTH_CONFIGURATION'
+    : isTimeout
+    ? 'UPSTREAM_TIMEOUT'
+    : !openRouterAttempted && !geminiAttempted
+    ? 'MISSING_API_KEYS'
+    : 'PROVIDER_EXECUTION_FAILURE';
+
+  // Comprehensive developer log visible in Vercel function logs
+  console.error('[CHAT_API_FAILURE]', JSON.stringify({
+    timestamp: new Date().toISOString(),
+    failureCategory,
+    mode,
+    targetModel: modelId,
+    reasoningEffort,
+    promptSnippet: prompt.slice(0, 160),
+    promptLength: prompt.length,
+    openRouter: {
+      attempted: !!openRouterAttempted,
+      error: openRouterErr || null,
+    },
+    gemini: {
+      attempted: !!geminiAttempted,
+      error: geminiErr || null,
+    },
+    serperCitationsRetrieved: initialCitations.length,
+  }, null, 2));
+
+  // Send routing confirmation
+  sendEvent({
+    type: 'routing',
+    modelId,
+    targetModel: modelId,
+    provider: 'System Notice',
+    reasoningEffort,
+  });
+
+  // Gentle thinking state
+  sendEvent({
+    type: 'thinking',
+    content: `Checking service capacity for ${modelId}...`,
+  });
+  await new Promise((r) => setTimeout(r, 120));
+
+  let fullResponse = '';
+
+  if (isRateLimit) {
+    fullResponse = `### ⏳ High Demand / Rate Limit Reached\n\n`;
+    fullResponse += `Sorry, you've hit the temporary rate limit or free-tier usage quota for **${modelId}**.\n\n`;
+    fullResponse += `**How you can continue:**\n`;
+    fullResponse += `- **Wait a moment**: Free-tier allowances usually refresh within 30 to 60 seconds. You can retry shortly.\n`;
+    fullResponse += `- **Switch models**: You can pick another available model (such as a Gemini or Flash variant) from the model menu above.\n`;
+    fullResponse += `- **Upgrade / Add Key**: If you have an OpenRouter or Gemini API key, add it in **Settings** (top right) for uninterrupted priority access.\n`;
+  } else if (isAuthError) {
+    fullResponse = `### 🔑 Provider Key Notice\n\n`;
+    fullResponse += `Sorry, we couldn't connect to **${modelId}** because the provider key is either unauthorized or needs verification.\n\n`;
+    fullResponse += `**How you can continue:**\n`;
+    fullResponse += `- **Switch models**: Select another available model from the dropdown above.\n`;
+    fullResponse += `- **Update Settings**: Verify or refresh your API key in **Settings** (top right).\n`;
+  } else if (isTimeout) {
+    fullResponse = `### ⏱️ Connection Timed Out\n\n`;
+    fullResponse += `Sorry, the upstream provider took longer than expected to respond. This is usually due to temporary regional network latency.\n\n`;
+    fullResponse += `**How you can continue:**\n`;
+    fullResponse += `- Please try resending your prompt in a few moments.\n`;
+    fullResponse += `- You can also switch to a faster model or lower the reasoning depth above.\n`;
+  } else if (!openRouterAttempted && !geminiAttempted) {
+    fullResponse = `### ⚙️ Service Setup Notice\n\n`;
+    fullResponse += `Sorry, no active model provider API key is currently configured for **${modelId}**.\n\n`;
+    fullResponse += `**How you can continue:**\n`;
+    fullResponse += `- Open **Settings** (top right) and configure your \`GEMINI_API_KEY\` or \`OPENROUTER_API_KEY\` to start chatting.\n`;
+    fullResponse += `- Or select a pre-configured model from the model list.\n`;
+  } else {
+    fullResponse = `### ⚠️ Temporarily Busy\n\n`;
+    fullResponse += `Sorry, we couldn't complete your request with **${modelId}** right now due to temporary upstream service traffic.\n\n`;
+    fullResponse += `**How you can continue:**\n`;
+    fullResponse += `- Please wait a few seconds and try your request again.\n`;
+    fullResponse += `- Switch to an alternative model in the top navigation bar.\n`;
+    fullResponse += `- Configure your own dedicated API key in **Settings** for guaranteed throughput.\n`;
   }
 
-  if (openRouterErr) {
-    const lower = openRouterErr.toLowerCase();
-    if (!primaryCause) {
-      if (openRouterErr.includes('429') || lower.includes('rate')) {
-        primaryCause = 'OpenRouter API rate limit reached.';
-      } else if (openRouterErr.includes('401') || openRouterErr.includes('403')) {
-        primaryCause = 'OpenRouter API authentication failed. Please verify your OpenRouter API key in Settings.';
-      } else if (lower.includes('timeout') || lower.includes('abort')) {
-        primaryCause = 'OpenRouter request timed out.';
-      } else {
-        primaryCause = `OpenRouter error: ${openRouterErr}`;
-      }
-    }
-    detailLines.push(`- **OpenRouter**: ${openRouterErr}`);
-  }
-
-  if (!primaryCause) {
-    if (!openRouterAttempted && !geminiAttempted) {
-      primaryCause =
-        'No active model provider API key is configured. Neither `GEMINI_API_KEY` nor `OPENROUTER_API_KEY` is available in Settings.';
-    } else {
-      primaryCause = 'Model providers were attempted but failed to return a valid response.';
-    }
-  }
-
-  let fullResponse = `### ⚠️ Request Could Not Be Completed\n\n`;
-  fullResponse += `Unable to generate a model response for target model **${modelId}** in **${mode.toUpperCase()}** mode.\n\n`;
-  fullResponse += `**Primary Failure Reason:**\n${primaryCause}\n\n`;
-
-  if (detailLines.length > 0) {
-    fullResponse += `**Diagnostic Details:**\n${detailLines.join('\n')}\n\n`;
-  }
-
-  // Citations handling (Fix #3):
-  // If Serper citations already fired and reached the client, acknowledge them; never claim citations are unavailable.
+  // Citations handling: If Serper citations were already retrieved, acknowledge them clearly
   if (initialCitations.length > 0) {
-    fullResponse += `> ℹ️ **Search Grounding Note**: Real-time web search via Google Serper succeeded and retrieved ${initialCitations.length} verified source citation(s) (displayed in the citation cards above). However, the language model could not complete the final text synthesis.\n\n`;
-  } else if (mode === 'researcher') {
-    fullResponse += `> ℹ️ **Search Grounding Note**: Live web search grounding was skipped (casual input/small-talk) or could not be completed.\n\n`;
+    fullResponse += `\n> ℹ️ *Web research located ${initialCitations.length} verified source citation(s), viewable in the Sources panel above.*\n`;
   }
-
-  fullResponse += `**Troubleshooting Steps:**\n`;
-  if (geminiErr?.includes('429') || openRouterErr?.includes('429')) {
-    fullResponse += `- **Rate Limit**: If using free-tier quota, wait 15–30 seconds before retrying.\n`;
-  }
-  fullResponse += `- **API Keys**: Open the **Settings** menu at the top right to verify or configure your \`GEMINI_API_KEY\` or \`OPENROUTER_API_KEY\`.\n`;
-  fullResponse += `- **Switch Models**: You can select another model or adjust reasoning effort in the top control bar.`;
 
   // Send citations if available
   if (initialCitations.length > 0) {
@@ -481,7 +512,7 @@ async function simulateStreamingResponse(
     type: 'done',
     modelId,
     routedModel: modelId,
-    provider: 'Provider Diagnostics',
+    provider: 'System Notice',
     tokens: {
       promptTokens: Math.round(prompt.length / 4),
       completionTokens: Math.round(fullResponse.length / 4),

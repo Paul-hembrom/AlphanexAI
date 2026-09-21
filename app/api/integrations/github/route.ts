@@ -8,9 +8,13 @@ export const maxDuration = 500;
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}));
-    const { action = 'create_pull_request', ...params } = body;
+    const {
+      action = 'create_pull_request',
+      userId = req.headers.get('x-user-id') || req.nextUrl.searchParams.get('userId') || 'usr_nepal_builder_001',
+      ...params
+    } = body;
 
-    const result = await executeGitHubAction(action, params);
+    const result = await executeGitHubAction(action, params, userId);
     return NextResponse.json(result);
   } catch (error: any) {
     return NextResponse.json(

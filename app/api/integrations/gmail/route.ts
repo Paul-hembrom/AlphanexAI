@@ -8,9 +8,13 @@ export const maxDuration = 500;
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}));
-    const { action = 'list_threads', ...params } = body;
+    const {
+      action = 'list_threads',
+      userId = req.headers.get('x-user-id') || req.nextUrl.searchParams.get('userId') || 'usr_nepal_builder_001',
+      ...params
+    } = body;
 
-    const result = await executeGmailAction(action, params);
+    const result = await executeGmailAction(action, params, userId);
     return NextResponse.json(result);
   } catch (error: any) {
     return NextResponse.json(
