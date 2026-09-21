@@ -6,8 +6,8 @@ export async function middleware(request: NextRequest) {
     request,
   });
 
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
-  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
+  const supabaseUrl = process.env.SUPABASE_PUBLIC_URL || process.env.SUPABASE_URL;
+  const supabaseKey = process.env.SUPABASE_PUBLIC_ANON_KEY || process.env.SUPABASE_ANON_KEY;
 
   // If Supabase credentials are not yet set in environment, pass through safely
   if (!supabaseUrl || !supabaseKey || !supabaseUrl.startsWith('http')) {

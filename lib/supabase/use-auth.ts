@@ -2,14 +2,15 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import type { User, Session } from '@supabase/supabase-js';
-import { createClient, isSupabaseConfigured } from './client';
+import { createClient, isSupabaseConfigured, setRuntimeSupabaseConfig } from './client';
 import { UserProfileSettings } from '../types';
 
 export function useAuth() {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<UserProfileSettings | null>(null);
-  const [isLoading, setIsLoading] = useState<boolean>(() => isSupabaseConfigured());
+  const [isConfigured, setIsConfigured] = useState<boolean>(() => isSupabaseConfigured());
+  const [isLoading, setIsLoading] = useState<boolean>(true);
 
   const fetchProfile = useCallback(async (activeUser: User) => {
     try {
@@ -110,69 +111,93 @@ export function useAuth() {
 
   useEffect(() => {
     let isMounted = true;
+    let cleanupSubscription: (() => void) | null = null;
 
-    if (!isSupabaseConfigured()) {
-      return;
-    }
+    const setupAuth = (client = createClient()) => {
+      // Initial session retrieval
+      client.auth
+        .getSession()
+        .then(async ({ data: { session: currentSession } }) => {
+          if (!isMounted) return;
+          setSession(currentSession);
+          if (currentSession?.user) {
+            setUser(currentSession.user);
+            await fetchProfile(currentSession.user);
+          } else {
+            setUser(null);
+            setProfile(null);
+          }
+          setIsLoading(false);
+        })
+        .catch((err) => {
+          if (!isMounted) return;
+          console.error('[useAuth] Error fetching initial session:', err);
+          setIsLoading(false);
+        });
 
-    const supabase = createClient();
-
-    // Initial session retrieval
-    supabase.auth
-      .getSession()
-      .then(async ({ data: { session: currentSession } }) => {
+      const {
+        data: { subscription },
+      } = client.auth.onAuthStateChange(async (_event, newSession) => {
         if (!isMounted) return;
-        setSession(currentSession);
-        if (currentSession?.user) {
-          setUser(currentSession.user);
-          await fetchProfile(currentSession.user);
+        setSession(newSession);
+        if (newSession?.user) {
+          setUser(newSession.user);
+          await fetchProfile(newSession.user);
         } else {
           setUser(null);
           setProfile(null);
         }
         setIsLoading(false);
-      })
-      .catch((err) => {
-        if (!isMounted) return;
-        console.error('[useAuth] Error fetching initial session:', err);
-        setIsLoading(false);
       });
 
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (_event, newSession) => {
-      if (!isMounted) return;
-      setSession(newSession);
-      if (newSession?.user) {
-        setUser(newSession.user);
-        await fetchProfile(newSession.user);
-      } else {
-        setUser(null);
-        setProfile(null);
-      }
-      setIsLoading(false);
-    });
-
-    // Listen for postMessage from OAuth popup callback
-    const handlePopupMessage = async (event: MessageEvent) => {
-      if (event.data?.type === 'SUPABASE_AUTH_SUCCESS') {
-        const {
-          data: { session: popupSession },
-        } = await supabase.auth.getSession();
-        if (!isMounted) return;
-        setSession(popupSession);
-        if (popupSession?.user) {
-          setUser(popupSession.user);
-          await fetchProfile(popupSession.user);
+      // Listen for postMessage from OAuth popup callback
+      const handlePopupMessage = async (event: MessageEvent) => {
+        if (event.data?.type === 'SUPABASE_AUTH_SUCCESS') {
+          const {
+            data: { session: popupSession },
+          } = await client.auth.getSession();
+          if (!isMounted) return;
+          setSession(popupSession);
+          if (popupSession?.user) {
+            setUser(popupSession.user);
+            await fetchProfile(popupSession.user);
+          }
         }
-      }
+      };
+      window.addEventListener('message', handlePopupMessage);
+
+      cleanupSubscription = () => {
+        subscription.unsubscribe();
+        window.removeEventListener('message', handlePopupMessage);
+      };
     };
-    window.addEventListener('message', handlePopupMessage);
+
+    if (isSupabaseConfigured()) {
+      setupAuth();
+    } else {
+      // Fallback check against /api/auth/config route
+      fetch('/api/auth/config')
+        .then((res) => res.json())
+        .then((cfg) => {
+          if (!isMounted) return;
+          if (cfg?.configured && cfg.url && cfg.anonKey) {
+            setRuntimeSupabaseConfig(cfg.url, cfg.anonKey);
+            setIsConfigured(true);
+            setupAuth(createClient());
+          } else {
+            setIsLoading(false);
+          }
+        })
+        .catch(() => {
+          if (isMounted) setIsLoading(false);
+        });
+    }
 
     return () => {
       isMounted = false;
-      subscription.unsubscribe();
-      window.removeEventListener('message', handlePopupMessage);
+      if (cleanupSubscription) {
+        cleanupSubscription();
+      }
     };
   }, [fetchProfile]);
 
@@ -197,6 +222,6 @@ export function useAuth() {
     isLoading,
     refreshSession,
     signOut,
-    isConfigured: isSupabaseConfigured(),
+    isConfigured: isConfigured || isSupabaseConfigured(),
   };
 }

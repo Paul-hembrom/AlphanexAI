@@ -5,8 +5,8 @@ import { cookies } from 'next/headers';
  * Checks if Supabase server-side environment variables are available.
  */
 export function isSupabaseServerConfigured(): boolean {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
+  const url = process.env.SUPABASE_PUBLIC_URL || process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_PUBLIC_ANON_KEY || process.env.SUPABASE_ANON_KEY;
   return !!(url && key && url.startsWith('http'));
 }
 
@@ -16,12 +16,12 @@ export function isSupabaseServerConfigured(): boolean {
  */
 export async function createClient() {
   const cookieStore = await cookies();
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
+  const url = process.env.SUPABASE_PUBLIC_URL || process.env.SUPABASE_URL;
+  const anonKey = process.env.SUPABASE_PUBLIC_ANON_KEY || process.env.SUPABASE_ANON_KEY;
 
   if (!url || !anonKey || !url.startsWith('http')) {
     throw new Error(
-      'Supabase environment variables (NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY) are missing or invalid.'
+      'Supabase environment variables (SUPABASE_PUBLIC_URL and SUPABASE_PUBLIC_ANON_KEY) are missing or invalid.'
     );
   }
 

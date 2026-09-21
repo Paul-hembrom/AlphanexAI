@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { Github, AlertCircle, Sparkles, Loader2, Key, CheckCircle2, ShieldCheck } from 'lucide-react';
-import { createClient, isSupabaseConfigured } from '@/lib/supabase/client';
+import { createClient, isSupabaseConfigured, setRuntimeSupabaseConfig } from '@/lib/supabase/client';
 
 interface SignInCardProps {
   onSuccess?: () => void;
@@ -25,8 +25,19 @@ export default function SignInCard({
     setErrorMessage(null);
 
     if (!isSupabaseConfigured()) {
-      setShowConfigNotice(true);
-      return;
+      try {
+        const res = await fetch('/api/auth/config');
+        const cfg = await res.json();
+        if (cfg?.configured && cfg.url && cfg.anonKey) {
+          setRuntimeSupabaseConfig(cfg.url, cfg.anonKey);
+        } else {
+          setShowConfigNotice(true);
+          return;
+        }
+      } catch {
+        setShowConfigNotice(true);
+        return;
+      }
     }
 
     setLoadingProvider(provider);
@@ -120,9 +131,9 @@ export default function SignInCard({
             To enable production authentication, configure the following variables in your deployment environment or Settings:
           </p>
           <div className="p-2 rounded bg-white/80 border border-amber-200 font-mono text-[10px] space-y-1">
-            <div>NEXT_PUBLIC_SUPABASE_URL</div>
-            <div>NEXT_PUBLIC_SUPABASE_ANON_KEY</div>
-            <div className="text-[#8C877F]"># Server-only (never prefix with NEXT_PUBLIC_)</div>
+            <div>SUPABASE_PUBLIC_URL</div>
+            <div>SUPABASE_PUBLIC_ANON_KEY</div>
+            <div className="text-[#8C877F]"># Server-only key</div>
             <div>SUPABASE_SERVICE_ROLE_KEY</div>
           </div>
           <p className="text-[10px] text-amber-700">

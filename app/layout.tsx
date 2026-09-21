@@ -17,8 +17,21 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({children}: {children: React.ReactNode}) {
+  const supabaseUrl = process.env.SUPABASE_PUBLIC_URL || process.env.SUPABASE_URL || '';
+  const supabaseAnonKey = process.env.SUPABASE_PUBLIC_ANON_KEY || process.env.SUPABASE_ANON_KEY || '';
+
   return (
     <html lang="en">
+      <head>
+        {supabaseUrl && supabaseAnonKey && (
+          <script
+            id="supabase-public-config"
+            dangerouslySetInnerHTML={{
+              __html: `window.__SUPABASE_PUBLIC_URL__=${JSON.stringify(supabaseUrl)};window.__SUPABASE_PUBLIC_ANON_KEY__=${JSON.stringify(supabaseAnonKey)};`,
+            }}
+          />
+        )}
+      </head>
       <body suppressHydrationWarning>{children}</body>
     </html>
   );

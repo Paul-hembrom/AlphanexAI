@@ -6,7 +6,7 @@ let cachedAdminClient: SupabaseClient | null = null;
  * Checks if the privileged Supabase service role key is configured.
  */
 export function isAdminConfigured(): boolean {
-  const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const url = process.env.SUPABASE_PUBLIC_URL || process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   return !!(url && key && url.startsWith('http') && key.length > 10);
 }
@@ -18,14 +18,14 @@ export function isAdminConfigured(): boolean {
  *
  * CRITICAL SECURITY INVARIANT:
  * NEVER import this file into any 'use client' component or client bundle.
- * SUPABASE_SERVICE_ROLE_KEY must NEVER be exposed to the browser or prefixed with NEXT_PUBLIC_.
+ * SUPABASE_SERVICE_ROLE_KEY must NEVER be exposed to the browser.
  */
 export function createAdminClient(): SupabaseClient {
   if (cachedAdminClient) {
     return cachedAdminClient;
   }
 
-  const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const url = process.env.SUPABASE_PUBLIC_URL || process.env.SUPABASE_URL;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
   if (!url || !serviceRoleKey || !url.startsWith('http')) {
