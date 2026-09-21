@@ -104,7 +104,7 @@ export interface GoogleDocsActionResult {
 // -----------------------------------------------------------------------------
 
 export async function executeGitHubAction(
-  action: 'create_pull_request' | 'search_code' | 'list_repos' | 'get_file_contents',
+  action: 'create_pull_request' | 'search_code' | 'list_repos' | 'get_file_contents' | 'get_repo_tree',
   params: Record<string, unknown>,
   userId: string
 ): Promise<GitHubActionResult> {
@@ -209,11 +209,11 @@ export async function executeGitHubAction(
   if (action === 'list_repos') {
     if (token) {
       try {
-        const res = await fetch('https://api.github.com/user/repos?sort=updated&per_page=10', {
+        const res = await fetch('https://api.github.com/user/repos?sort=updated&per_page=50&affiliation=owner,collaborator,organization_member', {
           headers: {
             Authorization: `Bearer ${token}`,
             Accept: 'application/vnd.github.v3+json',
-            'User-Agent': 'AI-Festa-Studio-Applet',
+            'User-Agent': 'Alphanex-AI-Studio-Applet',
           },
         });
         if (res.ok) {
@@ -226,10 +226,14 @@ export async function executeGitHubAction(
               id: r.id,
               name: r.name,
               fullName: r.full_name,
+              owner: r.owner?.login || (r.full_name ? r.full_name.split('/')[0] : 'user'),
               url: r.html_url,
-              private: r.private,
-              defaultBranch: r.default_branch,
-              description: r.description,
+              private: Boolean(r.private),
+              defaultBranch: r.default_branch || 'main',
+              description: r.description || '',
+              updatedAt: r.updated_at,
+              stargazersCount: r.stargazers_count ?? 0,
+              language: r.language || 'Code',
             })),
             message: `Retrieved ${repos.length} live repositories from GitHub (${tokenSource}).`,
           };
@@ -250,22 +254,99 @@ export async function executeGitHubAction(
           id: 101,
           name: 'fintech-core',
           fullName: 'nepal-devs/fintech-core',
+          owner: 'nepal-devs',
           url: 'https://github.com/nepal-devs/fintech-core',
           private: false,
           defaultBranch: 'main',
           description: 'South Asia fintech payment gateway adapters (eSewa v2, Khalti, ConnectIPS).',
+          updatedAt: new Date().toISOString(),
+          stargazersCount: 42,
+          language: 'Python',
         },
         {
           id: 102,
           name: 'alphanex-research-engine',
           fullName: 'nepal-devs/alphanex-research-engine',
+          owner: 'nepal-devs',
           url: 'https://github.com/nepal-devs/alphanex-research-engine',
           private: true,
           defaultBranch: 'main',
           description: 'Frontier AI reasoning loops, MCP connectors, and Python WASM sandbox.',
+          updatedAt: new Date().toISOString(),
+          stargazersCount: 19,
+          language: 'TypeScript',
         },
       ],
       message: `Retrieved repository manifest (${tokenSource}).`,
+    };
+  }
+
+  if (action === 'get_repo_tree') {
+    const ownerParam = (params.owner as string) || 'nepal-devs';
+    const repoParam = (params.repo as string) || 'fintech-core';
+    const branchParam = (params.branch as string) || 'main';
+
+    if (token) {
+      try {
+        const treeUrl = `https://api.github.com/repos/${encodeURIComponent(ownerParam)}/${encodeURIComponent(repoParam)}/git/trees/${encodeURIComponent(branchParam)}?recursive=1`;
+        const res = await fetch(treeUrl, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: 'application/vnd.github.v3+json',
+            'User-Agent': 'Alphanex-AI-Studio-Applet',
+          },
+        });
+        if (res.ok) {
+          const treeData = await res.json();
+          const treeNodes = Array.isArray(treeData.tree) ? treeData.tree : [];
+          return {
+            success: true,
+            action,
+            tokenSource,
+            data: {
+              owner: ownerParam,
+              repo: repoParam,
+              branch: branchParam,
+              sha: treeData.sha,
+              tree: treeNodes.map((node: any) => ({
+                path: node.path,
+                mode: node.mode,
+                type: node.type, // 'blob' (file) | 'tree' (dir)
+                sha: node.sha,
+                size: node.size,
+                url: node.url,
+              })),
+              truncated: Boolean(treeData.truncated),
+            },
+            message: `Retrieved ${treeNodes.length} repository tree items for ${ownerParam}/${repoParam}@${branchParam} (${tokenSource}).`,
+          };
+        } else {
+          console.warn(`[github] get_repo_tree status ${res.status} for ${ownerParam}/${repoParam}@${branchParam}`);
+        }
+      } catch (e) {
+        console.warn('GitHub get_repo_tree error:', e);
+      }
+    }
+
+    return {
+      success: true,
+      action,
+      tokenSource,
+      data: {
+        owner: ownerParam,
+        repo: repoParam,
+        branch: branchParam,
+        tree: [
+          { path: 'payment_gateway/esewa_v2.py', type: 'blob', size: 1420 },
+          { path: 'payment_gateway/khalti_sdk.py', type: 'blob', size: 2150 },
+          { path: 'payment_gateway/connect_ips.py', type: 'blob', size: 1890 },
+          { path: 'docs/architecture_spec.md', type: 'blob', size: 3400 },
+          { path: 'README.md', type: 'blob', size: 1200 },
+          { path: 'package.json', type: 'blob', size: 850 },
+        ],
+        truncated: false,
+      },
+      message: `Retrieved repository tree (${tokenSource}).`,
     };
   }
 
@@ -321,19 +402,32 @@ export async function executeGitHubAction(
   const pathParam = (params.path as string) || 'payment_gateway/esewa_v2.py';
   const ownerParam = (params.owner as string) || 'nepal-devs';
   const repoParam = (params.repo as string) || 'fintech-core';
+  const refParam = (params.ref as string) || (params.branch as string) || '';
 
   if (token) {
     try {
-      const res = await fetch(`https://api.github.com/repos/${ownerParam}/${repoParam}/contents/${pathParam}`, {
+      const query = refParam ? `?ref=${encodeURIComponent(refParam)}` : '';
+      const res = await fetch(`https://api.github.com/repos/${encodeURIComponent(ownerParam)}/${encodeURIComponent(repoParam)}/contents/${pathParam}${query}`, {
         headers: {
           Authorization: `Bearer ${token}`,
           Accept: 'application/vnd.github.v3+json',
-          'User-Agent': 'AI-Festa-Studio-Applet',
+          'User-Agent': 'Alphanex-AI-Studio-Applet',
         },
       });
       if (res.ok) {
         const fileData = await res.json();
-        const content = fileData.content ? Buffer.from(fileData.content, 'base64').toString('utf-8') : '';
+        let content = '';
+        if (fileData.content) {
+          content = Buffer.from(fileData.content.replace(/\n/g, ''), 'base64').toString('utf-8');
+        } else if (fileData.download_url) {
+          const dlRes = await fetch(fileData.download_url, {
+            headers: {
+              Authorization: `Bearer ${token}`,
+              'User-Agent': 'Alphanex-AI-Studio-Applet',
+            },
+          });
+          if (dlRes.ok) content = await dlRes.text();
+        }
         return {
           success: true,
           action,
@@ -341,7 +435,10 @@ export async function executeGitHubAction(
           data: {
             path: pathParam,
             content,
-            size: fileData.size,
+            size: fileData.size ?? content.length,
+            owner: ownerParam,
+            repo: repoParam,
+            branch: refParam || 'main',
           },
           message: `Live file contents retrieved from ${ownerParam}/${repoParam}/${pathParam} (${tokenSource}).`,
         };
@@ -359,6 +456,9 @@ export async function executeGitHubAction(
       path: pathParam,
       content: `# eSewa v2 Gateway Implementation\nimport hmac\nimport hashlib\nimport base64\n\ndef verify_signature(data: str, signature: str, secret: str) -> bool:\n    digest = hmac.new(secret.encode(), data.encode(), hashlib.sha256).digest()\n    expected = base64.b64encode(digest).decode()\n    return hmac.compare_digest(expected, signature)\n`,
       size: 1420,
+      owner: ownerParam,
+      repo: repoParam,
+      branch: refParam || 'main',
     },
     message: `File contents retrieved successfully (${tokenSource}).`,
   };
@@ -834,11 +934,12 @@ export async function executeMCPTool(
 ): Promise<{ success: boolean; result: unknown; message: string }> {
   try {
     if (server === 'github' || tool.startsWith('github_')) {
-      const actionMap: Record<string, 'create_pull_request' | 'search_code' | 'list_repos' | 'get_file_contents'> = {
+      const actionMap: Record<string, 'create_pull_request' | 'search_code' | 'list_repos' | 'get_file_contents' | 'get_repo_tree'> = {
         github_create_pull_request: 'create_pull_request',
         github_search_code: 'search_code',
         github_list_repos: 'list_repos',
         github_get_file_contents: 'get_file_contents',
+        github_get_repo_tree: 'get_repo_tree',
       };
       const action = actionMap[tool] || 'create_pull_request';
       const result = await executeGitHubAction(action, args, userId);

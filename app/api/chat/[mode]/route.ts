@@ -33,6 +33,7 @@ export async function POST(
     reasoningEffort = 'Medium',
     buildStack = 'html-css-js',
     userSettings,
+    attachments = [],
   } = body;
 
   const encoder = new TextEncoder();
@@ -240,6 +241,23 @@ export async function POST(
             }
           }
         }
+        // Inject attached repository files into system instruction / context
+        if (Array.isArray(attachments) && attachments.length > 0) {
+          const validAttachments = attachments.filter(
+            (att: any) => att && (att.content || att.path || att.name)
+          );
+          if (validAttachments.length > 0) {
+            const filesContext = validAttachments
+              .map((att: any, idx: number) => {
+                const header = `File ${idx + 1}: ${att.path || att.name || 'code_file'}${att.repo ? ` (Repository: ${att.repo}${att.branch ? `@${att.branch}` : ''})` : ''}`;
+                return `### ${header}\n\`\`\`\n${att.content || ''}\n\`\`\``;
+              })
+              .join('\n\n');
+
+            baseSysInstruction += `\n\n### Attached Repository Code Context (User-Selected Files):\nThe user has explicitly attached the following files from their connected GitHub repository into this conversation context. Ground your answers, code reviews, bug fixes, and architectural explanations directly on these real files:\n\n${filesContext}\n\nDirectives for Attached Files:\n- Carefully inspect and reference these exact file contents, variable names, functions, and architecture.\n- Ground all reasoning on the code provided above.\n`;
+          }
+        }
+
         params.systemInstruction = baseSysInstruction;
 
         let openRouterAttempted = false;

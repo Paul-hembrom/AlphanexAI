@@ -146,6 +146,17 @@ export interface BuildProgressStep {
   timestamp: number;
 }
 
+export interface ChatAttachment {
+  id?: string;
+  name: string;
+  path: string;
+  content: string;
+  size?: number;
+  repo?: string;
+  branch?: string;
+  type?: 'file' | 'repo_file' | 'document';
+}
+
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant' | 'system';
@@ -159,6 +170,7 @@ export interface ChatMessage {
   diffData?: DiffData;
   webappBuild?: WebappBuildData;
   buildSteps?: BuildProgressStep[];
+  attachments?: ChatAttachment[];
   isThinking?: boolean;
   thinkingContent?: string;
   reasoningEffort?: ReasoningEffort;

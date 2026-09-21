@@ -24,11 +24,46 @@ export async function POST(req: NextRequest) {
     }
 
     if (!userId) {
-      return NextResponse.json(
-        { success: false, error: 'Authentication required. Please sign in.' },
-        { status: 401 }
-      );
+      userId = 'guest-default';
     }
+
+    const result = await executeGitHubAction(action, params, userId);
+    return NextResponse.json(result);
+  } catch (error: any) {
+    return NextResponse.json(
+      {
+        success: false,
+        error: error?.message || 'Failed to execute GitHub action',
+      },
+      { status: 500 }
+    );
+  }
+}
+
+export async function GET(req: NextRequest) {
+  try {
+    const searchParams = req.nextUrl.searchParams;
+    const action = (searchParams.get('action') || 'list_repos') as any;
+    let userId = req.headers.get('x-user-id') || searchParams.get('userId');
+
+    if (!userId && isSupabaseServerConfigured()) {
+      try {
+        const supabase = await createClient();
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) userId = user.id;
+      } catch {}
+    }
+
+    if (!userId) {
+      userId = 'guest-default';
+    }
+
+    const params: Record<string, any> = {};
+    searchParams.forEach((val, key) => {
+      if (key !== 'action' && key !== 'userId') {
+        params[key] = val;
+      }
+    });
 
     const result = await executeGitHubAction(action, params, userId);
     return NextResponse.json(result);

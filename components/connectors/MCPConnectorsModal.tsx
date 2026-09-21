@@ -156,9 +156,14 @@ const UPCOMING_PLUGINS = [
 interface MCPConnectorsModalProps {
   isOpen: boolean;
   onClose: () => void;
+  onOpenRepoBrowser?: () => void;
 }
 
-export default function MCPConnectorsModal({ isOpen, onClose }: MCPConnectorsModalProps) {
+export default function MCPConnectorsModal({
+  isOpen,
+  onClose,
+  onOpenRepoBrowser,
+}: MCPConnectorsModalProps) {
   const [connectors, setConnectors] = useState<MCPConnectorItem[]>(() => {
     if (typeof window !== 'undefined') {
       try {
@@ -421,18 +426,33 @@ export default function MCPConnectorsModal({ isOpen, onClose }: MCPConnectorsMod
                     {/* Expandable Tools & Config Drawer */}
                     {isExpanded && (
                       <div className="px-4 pb-4 pt-1 border-t border-[#E5E2DC]/80 bg-[#FAF8F5] rounded-b-xl space-y-3">
-                        <div className="text-[11px] font-semibold text-[#858079] uppercase tracking-wider flex items-center justify-between">
+                        <div className="text-[11px] font-semibold text-[#858079] uppercase tracking-wider flex items-center justify-between flex-wrap gap-2">
                           <span>Discovered MCP Tools:</span>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setTokenInputModalId(connector.id);
-                              setTokenInputVal('');
-                            }}
-                            className="text-[11px] text-blue-600 hover:underline font-medium cursor-pointer"
-                          >
-                            Configure Custom Auth Token
-                          </button>
+                          <div className="flex items-center gap-3">
+                            {connector.id === 'github' && onOpenRepoBrowser && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  onClose();
+                                  onOpenRepoBrowser();
+                                }}
+                                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-[#1F1E1D] hover:bg-black text-[#FBF9F5] text-xs font-medium transition-colors cursor-pointer shadow-2xs"
+                              >
+                                <Github className="w-3.5 h-3.5 text-amber-400" />
+                                <span>Browse & Attach Repo Files</span>
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setTokenInputModalId(connector.id);
+                                setTokenInputVal('');
+                              }}
+                              className="text-[11px] text-blue-600 hover:underline font-medium cursor-pointer"
+                            >
+                              Configure Custom Auth Token
+                            </button>
+                          </div>
                         </div>
 
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">

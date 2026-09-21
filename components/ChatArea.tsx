@@ -22,6 +22,12 @@ import {
   Wrench,
   Loader2,
   ClipboardList,
+  Github,
+  Paperclip,
+  Trash2,
+  Eye,
+  EyeOff,
+  FolderGit2,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import {
@@ -30,6 +36,7 @@ import {
   DiffData,
   WorkMode,
   ModelInfo,
+  ChatAttachment,
 } from '@/lib/types';
 import { SAMPLE_PROMPTS_BY_MODE, AVAILABLE_MODELS } from '@/lib/constants';
 
@@ -45,6 +52,9 @@ interface ChatAreaProps {
   onSelectPrompt: (prompt: string) => void;
   userCredits: number;
   onChangeMode?: (mode: WorkMode) => void;
+  pendingAttachments?: ChatAttachment[];
+  onRemoveAttachment?: (index: number) => void;
+  onOpenRepoBrowser?: () => void;
 }
 
 export default function ChatArea({
@@ -59,9 +69,13 @@ export default function ChatArea({
   onSelectPrompt,
   userCredits,
   onChangeMode,
+  pendingAttachments = [],
+  onRemoveAttachment,
+  onOpenRepoBrowser,
 }: ChatAreaProps) {
   const [inputText, setInputText] = useState('');
   const [expandedThinking, setExpandedThinking] = useState<Record<string, boolean>>({});
+  const [expandedAttachmentId, setExpandedAttachmentId] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [activeCitationModal, setActiveCitationModal] = useState<Citation | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -307,8 +321,54 @@ export default function ChatArea({
               >
                 {/* User Prompt Bubble */}
                 {isUser && (
-                  <div className="max-w-[85%] bg-[#1F1E1D] text-[#FBF9F5] rounded-2xl rounded-tr-xs px-4 py-3 text-sm leading-relaxed shadow-sm">
-                    <p className="whitespace-pre-wrap">{message.content}</p>
+                  <div className="max-w-[85%] flex flex-col items-end gap-1.5">
+                    {/* Attached Repo Files Chips */}
+                    {message.attachments && message.attachments.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 justify-end">
+                        {message.attachments.map((att, attIdx) => {
+                          const attKey = `${message.id}-att-${attIdx}`;
+                          const isExpanded = expandedAttachmentId === attKey;
+                          const sizeKb = att.size ? (att.size / 1024).toFixed(1) : null;
+
+                          return (
+                            <div
+                              key={attIdx}
+                              className="inline-flex flex-col text-xs rounded-xl bg-[#2A2927] border border-[#3E3C39] text-[#E5E2DC] shadow-2xs overflow-hidden max-w-full"
+                            >
+                              <div className="flex items-center gap-1.5 px-2.5 py-1">
+                                <Github className="w-3 h-3 text-blue-400 shrink-0" />
+                                <span className="font-mono text-[11px] text-white truncate max-w-[220px]" title={att.path || att.name}>
+                                  {att.path || att.name}
+                                </span>
+                                {sizeKb && (
+                                  <span className="text-[10px] text-[#A8A298] font-mono">
+                                    {sizeKb} KB
+                                  </span>
+                                )}
+                                {att.content && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setExpandedAttachmentId(isExpanded ? null : attKey)}
+                                    className="p-0.5 rounded text-[#A8A298] hover:text-white cursor-pointer ml-1"
+                                    title={isExpanded ? 'Hide code preview' : 'Preview attached code'}
+                                  >
+                                    {isExpanded ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                                  </button>
+                                )}
+                              </div>
+                              {isExpanded && att.content && (
+                                <div className="px-3 py-2 bg-[#191817] border-t border-[#3E3C39] max-h-48 overflow-y-auto text-[11px] font-mono text-emerald-300 whitespace-pre-wrap">
+                                  {att.content}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                    <div className="bg-[#1F1E1D] text-[#FBF9F5] rounded-2xl rounded-tr-xs px-4 py-3 text-sm leading-relaxed shadow-sm w-full">
+                      <p className="whitespace-pre-wrap">{message.content}</p>
+                    </div>
                   </div>
                 )}
 
@@ -685,7 +745,43 @@ export default function ChatArea({
         id="chat-input-dock"
         className="px-3 sm:px-4 py-2 bg-[#FBF9F5] border-t border-[#E5E2DC]"
       >
-        <div className="max-w-2xl mx-auto">
+        <div className="max-w-2xl mx-auto space-y-1.5">
+          {/* Pending Attachments Bar */}
+          {pendingAttachments.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5 p-2 rounded-xl bg-[#F0ECE4] border border-[#DDD7CD] text-xs">
+              <div className="flex items-center gap-1 text-[11px] font-semibold text-[#55504A] mr-1">
+                <Paperclip className="w-3 h-3 text-blue-600" />
+                <span>Attached Files ({pendingAttachments.length}):</span>
+              </div>
+              {pendingAttachments.map((att, idx) => (
+                <div
+                  key={idx}
+                  className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-white border border-[#DDD7CD] text-[11px] text-[#1F1E1D] shadow-2xs font-mono max-w-[200px]"
+                >
+                  <Github className="w-2.5 h-2.5 text-blue-600 shrink-0" />
+                  <span className="truncate" title={att.path || att.name}>
+                    {att.path?.split('/').pop() || att.name}
+                  </span>
+                  {att.size ? (
+                    <span className="text-[9px] text-[#858079] shrink-0">
+                      {(att.size / 1024).toFixed(1)}k
+                    </span>
+                  ) : null}
+                  {onRemoveAttachment && (
+                    <button
+                      type="button"
+                      onClick={() => onRemoveAttachment(idx)}
+                      className="text-[#858079] hover:text-red-600 cursor-pointer ml-0.5"
+                      title="Remove file"
+                    >
+                      <Trash2 className="w-2.5 h-2.5" />
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
           <form
             onSubmit={handleSubmit}
             className="flex items-center gap-1.5 px-2 py-1.5 rounded-full border border-[#E5E2DC] bg-[#FDFBF7] shadow-xs focus-within:border-[#A8A298] focus-within:ring-2 focus-within:ring-[#B8B2A6]/20 transition-all"
@@ -728,6 +824,20 @@ export default function ChatArea({
               </div>
             )}
 
+            {/* GitHub Repo Context Attachment Button */}
+            {onOpenRepoBrowser && (
+              <button
+                type="button"
+                id="chat-attach-repo-btn"
+                onClick={onOpenRepoBrowser}
+                className="shrink-0 flex items-center justify-center w-7 h-7 rounded-full text-[#66615B] hover:text-[#1F1E1D] hover:bg-[#EFECE6] transition-colors cursor-pointer"
+                title="Connect repository and attach files into chat context"
+                aria-label="Connect GitHub Repository"
+              >
+                <Github className="w-3.5 h-3.5" />
+              </button>
+            )}
+
             {/* Inline Textarea */}
             <textarea
               ref={textareaRef}
@@ -736,8 +846,10 @@ export default function ChatArea({
               onChange={(e) => setInputText(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder={
-                currentMode === 'developer'
-                  ? 'Ask Gemini to write or debug code...'
+                pendingAttachments.length > 0
+                  ? `Ask Gemini about the ${pendingAttachments.length} attached files...`
+                  : currentMode === 'developer'
+                  ? 'Ask Gemini to write or debug code (or click GitHub to attach repo files)...'
                   : currentMode === 'researcher'
                   ? 'Ask Gemini to research or analyze data...'
                   : 'Ask Gemini anything...'
@@ -779,10 +891,21 @@ export default function ChatArea({
             <span className="truncate">
               {selectedModel.name}
               {selectedModel.costPerQueryCredits > 0 && ` · ${selectedModel.costPerQueryCredits} cr`}
+              {pendingAttachments.length > 0 && ` · ${pendingAttachments.length} repo files attached`}
             </span>
-            <span className="hidden sm:inline">
-              Shift+Enter for newline
-            </span>
+            <div className="flex items-center gap-2">
+              {onOpenRepoBrowser && (
+                <button
+                  type="button"
+                  onClick={onOpenRepoBrowser}
+                  className="hover:text-[#1F1E1D] transition-colors cursor-pointer flex items-center gap-1"
+                >
+                  <Github className="w-2.5 h-2.5" />
+                  <span>Connect repo</span>
+                </button>
+              )}
+              <span className="hidden sm:inline">Shift+Enter for newline</span>
+            </div>
           </div>
         </div>
       </div>

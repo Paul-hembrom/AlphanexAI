@@ -11,6 +11,7 @@ import ParameterDrawer from '@/components/ParameterDrawer';
 import PaymentModal from '@/components/PaymentModal';
 import SettingsModal, { SettingsTabId } from '@/components/settings/SettingsModal';
 import MCPConnectorsModal from '@/components/connectors/MCPConnectorsModal';
+import RepoBrowserModal from '@/components/connectors/RepoBrowserModal';
 import {
   WorkMode,
   ModelInfo,
@@ -25,6 +26,7 @@ import {
   WebappBuildData,
   BuildStack,
   BuildProgressStep,
+  ChatAttachment,
 } from '@/lib/types';
 import {
   saveWebAppData,
@@ -142,8 +144,22 @@ export default function WorkspaceView() {
   const activeProfile = authProfile || userProfile;
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [isConnectorsModalOpen, setIsConnectorsModalOpen] = useState(false);
+  const [isRepoBrowserOpen, setIsRepoBrowserOpen] = useState(false);
+  const [pendingAttachments, setPendingAttachments] = useState<ChatAttachment[]>([]);
   const [isSignInModalOpen, setIsSignInModalOpen] = useState(false);
   const [settingsInitialTab, setSettingsInitialTab] = useState<SettingsTabId>('profile');
+
+  const handleAttachRepoFiles = (files: ChatAttachment[]) => {
+    setPendingAttachments((prev) => {
+      const existingPaths = new Set(prev.map((f) => f.path || f.name));
+      const newUnique = files.filter((f) => !existingPaths.has(f.path || f.name));
+      return [...prev, ...newUnique];
+    });
+  };
+
+  const handleRemovePendingAttachment = (index: number) => {
+    setPendingAttachments((prev) => prev.filter((_, i) => i !== index));
+  };
 
   // Sidebar & Threads State (Initialized empty to ensure only user's real chats appear)
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
@@ -685,6 +701,7 @@ export default function WorkspaceView() {
     }
 
     const randomSuffix = Math.random().toString(36).slice(2, 6);
+    const userAttachments = pendingAttachments.length > 0 ? [...pendingAttachments] : undefined;
     const userMessage: ChatMessage = {
       id: `user-${Date.now()}-${randomSuffix}`,
       role: 'user',
@@ -692,6 +709,7 @@ export default function WorkspaceView() {
       timestamp: Date.now(),
       mode: currentMode,
       modelId: selectedModel.id,
+      attachments: userAttachments,
     };
 
     // Ensure we have an active thread or generate a new one
@@ -741,10 +759,14 @@ export default function WorkspaceView() {
           params: workspaceParams,
           buildStack: selectedBuildStack,
           userSettings: activeProfile,
+          attachments: userAttachments,
           history: messages.slice(-6).map((m) => ({ role: m.role, content: m.content })),
         }),
         signal: abortController.signal,
       });
+
+      // Clear pending attachments once submitted into the conversation context
+      setPendingAttachments([]);
 
       if (!response.ok || !response.body) {
         throw new Error(`HTTP error ${response.status}`);
@@ -1269,6 +1291,9 @@ export default function WorkspaceView() {
             onSelectPrompt={(text) => handleSendMessage(text)}
             userCredits={wallet.credits}
             onChangeMode={handleChangeMode}
+            pendingAttachments={pendingAttachments}
+            onRemoveAttachment={handleRemovePendingAttachment}
+            onOpenRepoBrowser={() => setIsRepoBrowserOpen(true)}
           />
         </div>
 
@@ -1599,6 +1624,15 @@ export default function WorkspaceView() {
       <MCPConnectorsModal
         isOpen={isConnectorsModalOpen}
         onClose={() => setIsConnectorsModalOpen(false)}
+        onOpenRepoBrowser={() => setIsRepoBrowserOpen(true)}
+      />
+
+      {/* GitHub Repository Browser Modal (Claude.ai / Grok style) */}
+      <RepoBrowserModal
+        isOpen={isRepoBrowserOpen}
+        onClose={() => setIsRepoBrowserOpen(false)}
+        onAttachFiles={handleAttachRepoFiles}
+        userId={user?.id || userProfile.id}
       />
 
       {/* Real Supabase Authentication Modal */}

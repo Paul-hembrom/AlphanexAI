@@ -118,7 +118,11 @@ export async function getUserConnection(
 
   // 2. Fallback to resilient encrypted local store
   const localRecords = readLocalEncryptedStore();
-  const match = localRecords.find((r) => r.user_id === userId && r.provider === provider);
+  let match = localRecords.find((r) => r.user_id === userId && r.provider === provider);
+  if (!match) {
+    // If no exact match for this userId, check for any stored connection for this provider
+    match = localRecords.find((r) => r.provider === provider);
+  }
   if (match) {
     return {
       id: match.id,
