@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { generateSignedState } from '@/lib/oauth-state';
+import { createClient, isSupabaseServerConfigured } from '@/lib/supabase/server';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -18,8 +19,27 @@ function getBaseUrl(req: NextRequest): string {
 
 export async function GET(req: NextRequest) {
   const searchParams = req.nextUrl.searchParams;
-  const userId = searchParams.get('userId') || 'usr_nepal_builder_001';
+  let userId = searchParams.get('userId');
+
+  if (!userId && isSupabaseServerConfigured()) {
+    try {
+      const supabase = await createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) userId = user.id;
+    } catch {}
+  }
+
   const format = searchParams.get('format');
+
+  if (!userId) {
+    const errorMsg = 'Authentication required. Please sign in to connect Google Workspace.';
+    if (format === 'json') {
+      return NextResponse.json({ success: false, error: errorMsg }, { status: 401 });
+    }
+    return NextResponse.redirect(
+      new URL('/?settings=connectors&error=unauthenticated', req.nextUrl.origin)
+    );
+  }
 
   const clientId = process.env.GOOGLE_OAUTH_CLIENT_ID;
   if (!clientId) {

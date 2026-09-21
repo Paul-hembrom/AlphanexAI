@@ -20,7 +20,10 @@ import {
   Home,
   Link2,
   Terminal,
+  LogIn,
+  LogOut,
 } from 'lucide-react';
+import type { User } from '@supabase/supabase-js';
 import { WorkMode, ModelInfo, ReasoningEffort, UserWallet, ModelTier, UserProfileSettings } from '@/lib/types';
 import ModelSelector from './ModelSelector';
 import EffortSlider from './EffortSlider';
@@ -48,6 +51,9 @@ interface HeaderProps {
   onOpenSettings?: () => void;
   onOpenConnectors?: () => void;
   profile?: UserProfileSettings;
+  user?: User | null;
+  onOpenSignIn?: () => void;
+  onSignOut?: () => void;
 }
 
 export default function Header({
@@ -73,6 +79,9 @@ export default function Header({
   onOpenSettings,
   onOpenConnectors,
   profile,
+  user,
+  onOpenSignIn,
+  onSignOut,
 }: HeaderProps) {
   return (
     <header
@@ -375,8 +384,40 @@ export default function Header({
               ) : (
                 <Settings className="w-4 h-4" />
               )}
-              <span className="hidden xl:inline text-xs font-medium">Settings</span>
+              <span className="hidden xl:inline text-xs font-medium">
+                {user ? (profile?.fullName?.split(' ')[0] || 'Profile') : 'Settings'}
+              </span>
             </button>
+          )}
+
+          {/* Authentication Action Button */}
+          {user ? (
+            onSignOut && (
+              <button
+                id="header-sign-out-btn"
+                type="button"
+                onClick={onSignOut}
+                className="p-1.5 rounded-lg border border-[#E5E2DC] bg-[#FBF9F5] hover:bg-red-50 text-[#736E67] hover:text-red-700 transition-colors cursor-pointer hidden sm:flex items-center gap-1"
+                title="Sign out of account"
+                aria-label="Sign out"
+              >
+                <LogOut className="w-4 h-4" />
+                <span className="hidden 2xl:inline text-xs font-medium">Sign Out</span>
+              </button>
+            )
+          ) : (
+            onOpenSignIn && (
+              <button
+                id="header-sign-in-btn"
+                type="button"
+                onClick={onOpenSignIn}
+                className="px-3 py-1.5 rounded-lg border border-[#1F1E1D] bg-[#1F1E1D] hover:bg-[#33302C] text-white text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 shadow-xs"
+                title="Sign in with Google or GitHub"
+              >
+                <LogIn className="w-3.5 h-3.5" />
+                <span>Sign In</span>
+              </button>
+            )
           )}
 
           {/* Mobile Tab Switcher (Chat vs Canvas) */}

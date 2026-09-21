@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { encryptToken, decryptToken } from './crypto';
 
 export interface UserConnection {
@@ -32,30 +32,18 @@ interface StoredEncryptedRecord {
 }
 
 // ---------------------------------------------------------------------------
-// Supabase Client Initialization (Server-side)
+// Supabase Client Initialization (Server-side via Admin client)
 // ---------------------------------------------------------------------------
-let supabaseClient: SupabaseClient | null = null;
+import { createAdminClient, isAdminConfigured } from './supabase/admin';
 
 function getSupabaseClient(): SupabaseClient | null {
-  if (supabaseClient) return supabaseClient;
-
-  const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key =
-    process.env.SUPABASE_SERVICE_ROLE_KEY ||
-    process.env.SUPABASE_ANON_KEY ||
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-  if (url && key && url.startsWith('http')) {
-    try {
-      supabaseClient = createClient(url, key, {
-        auth: { persistSession: false },
-      });
-      return supabaseClient;
-    } catch (e) {
-      console.warn('[user-connections] Could not initialize Supabase client:', e);
-    }
+  if (!isAdminConfigured()) return null;
+  try {
+    return createAdminClient();
+  } catch (e) {
+    console.warn('[user-connections] Could not initialize Supabase admin client:', e);
+    return null;
   }
-  return null;
 }
 
 // ---------------------------------------------------------------------------

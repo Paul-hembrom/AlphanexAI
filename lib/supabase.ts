@@ -10,6 +10,10 @@ import {
 } from './types';
 import { INITIAL_DIFF_SAMPLE } from './constants';
 
+import { createClient as createBrowserClient, isSupabaseConfigured } from './supabase/client';
+
+export { createBrowserClient, isSupabaseConfigured };
+
 export const PROFILE_STORAGE_KEY = 'ai_festa_user_profile_v2';
 export const TRANSACTIONS_STORAGE_KEY = 'ai_festa_transactions_v2';
 export const SESSIONS_STORAGE_KEY = 'ai_festa_active_sessions_v2';
@@ -20,15 +24,11 @@ const STATIC_REF_TIME = 1757746800000;
 
 export const INITIAL_THREADS: ChatThread[] = [];
 
-export const INITIAL_USER_PROFILE: UserProfileSettings = {
-  id: 'usr_nepal_builder_001',
-  fullName: 'Paul Hembrom',
-  email: 'paul.hembrom@aifesta.np',
-  avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
-  workContext: 'dev',
+export const DEFAULT_PROFILE_TEMPLATE: Omit<UserProfileSettings, 'id' | 'fullName' | 'email' | 'avatarUrl'> = {
+  workContext: 'Full-Stack Developer',
   customWorkContextTitle: '',
-  institutionOrCompany: 'Tribhuvan University / IOE Pulchowk',
-  githubUsername: 'paulhembrom-np',
+  institutionOrCompany: '',
+  githubUsername: '',
   globalSystemInstruction: 'Act as an elite full-stack engineer and researcher specializing in high-performance TypeScript, Python WASM runtimes, and localized Nepali fintech/academic architectures.',
   nepaliTonePreference: 'formal_english_nepali_nuance',
   outputLanguageTone: 'Bilingual (English with Nepali explanations)',
@@ -42,8 +42,18 @@ export const INITIAL_USER_PROFILE: UserProfileSettings = {
   autoOpenDiffOnLargeChanges: true,
   displayInlineRunCodeButton: true,
   excludeFromModelTraining: true,
-  updatedAt: '2026-09-13T07:00:00.000Z',
+  updatedAt: new Date().toISOString(),
 };
+
+export const FALLBACK_GUEST_PROFILE: UserProfileSettings = {
+  id: '',
+  fullName: 'Guest User',
+  email: '',
+  avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
+  ...DEFAULT_PROFILE_TEMPLATE,
+};
+
+export const INITIAL_USER_PROFILE = FALLBACK_GUEST_PROFILE;
 
 export const INITIAL_TRANSACTIONS: BillingTransaction[] = [
   {
@@ -105,21 +115,25 @@ export const INITIAL_ACTIVE_SESSIONS: ActiveSession[] = [
   },
 ];
 
-export function getStoredProfile(): UserProfileSettings {
-  if (typeof window === 'undefined') return INITIAL_USER_PROFILE;
+export function getStoredProfile(): UserProfileSettings | null {
+  if (typeof window === 'undefined') return null;
   try {
     const raw = localStorage.getItem(PROFILE_STORAGE_KEY);
-    if (raw) return { ...INITIAL_USER_PROFILE, ...JSON.parse(raw) };
+    if (raw) return JSON.parse(raw);
   } catch {
     // fallback
   }
-  return INITIAL_USER_PROFILE;
+  return null;
 }
 
-export function saveStoredProfile(profile: UserProfileSettings): void {
+export function saveStoredProfile(profile: UserProfileSettings | null): void {
   if (typeof window === 'undefined') return;
   try {
-    localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(profile));
+    if (profile) {
+      localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(profile));
+    } else {
+      localStorage.removeItem(PROFILE_STORAGE_KEY);
+    }
     window.dispatchEvent(new CustomEvent('ai_festa_profile_updated', { detail: profile }));
   } catch (err) {
     console.error('Failed to save profile locally', err);
@@ -441,4 +455,26 @@ class ResilientSupabaseClient {
   }
 }
 
-export const supabase = new ResilientSupabaseClient();
+const fallbackClient = new ResilientSupabaseClient();
+
+export const supabase = {
+  get auth() {
+    if (isSupabaseConfigured()) {
+      return createBrowserClient().auth;
+    }
+    return {
+      getUser: async () => ({ data: { user: null }, error: null }),
+      getSession: async () => ({ data: { session: null }, error: null }),
+      signInWithOAuth: async () => ({ data: null, error: new Error('Supabase is not configured') }),
+      signOut: async () => ({ error: null }),
+      onAuthStateChange: () => ({ data: { subscription: { unsubscribe: () => {} } } }),
+    };
+  },
+  from(table: string) {
+    if (isSupabaseConfigured()) {
+      return createBrowserClient().from(table as any);
+    }
+    return fallbackClient.from(table);
+  },
+};
+

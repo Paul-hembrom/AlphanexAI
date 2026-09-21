@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { deleteUserConnection } from '@/lib/user-connections';
+import { createClient, isSupabaseServerConfigured } from '@/lib/supabase/server';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -7,7 +8,22 @@ export const dynamic = 'force-dynamic';
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}));
-    const { provider, userId = 'usr_nepal_builder_001' } = body;
+    let { provider, userId } = body;
+
+    if (!userId && isSupabaseServerConfigured()) {
+      try {
+        const supabase = await createClient();
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) userId = user.id;
+      } catch {}
+    }
+
+    if (!userId) {
+      return NextResponse.json(
+        { success: false, error: 'Authentication required. Please sign in.' },
+        { status: 401 }
+      );
+    }
 
     if (!provider || (provider !== 'github' && provider !== 'google')) {
       return NextResponse.json(

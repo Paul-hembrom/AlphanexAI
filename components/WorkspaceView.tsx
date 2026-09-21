@@ -46,6 +46,7 @@ import {
   INITIAL_DIFF_SAMPLE,
 } from '@/lib/constants';
 import {
+  FALLBACK_GUEST_PROFILE,
   INITIAL_USER_PROFILE,
   INITIAL_THREADS,
   getStoredThreads,
@@ -62,6 +63,8 @@ import {
   getStoredProfile,
   saveStoredProfile,
 } from '@/lib/supabase';
+import { useAuth } from '@/lib/supabase/use-auth';
+import SignInModal from '@/components/auth/SignInModal';
 
 const CANVAS_WIDTH_STORAGE_KEY = 'ai_festa_canvas_width_px';
 
@@ -126,9 +129,20 @@ export default function WorkspaceView() {
   );
 
   // User Profile & Settings Modal State
+  const {
+    user,
+    session,
+    profile: authProfile,
+    isLoading: isAuthLoading,
+    signOut,
+    isConfigured: isSupabaseConfigured,
+  } = useAuth();
+
   const [userProfile, setUserProfile] = useState<UserProfileSettings>(INITIAL_USER_PROFILE);
+  const activeProfile = authProfile || userProfile;
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [isConnectorsModalOpen, setIsConnectorsModalOpen] = useState(false);
+  const [isSignInModalOpen, setIsSignInModalOpen] = useState(false);
   const [settingsInitialTab, setSettingsInitialTab] = useState<SettingsTabId>('profile');
 
   // Sidebar & Threads State (Initialized empty to ensure only user's real chats appear)
@@ -246,9 +260,11 @@ export default function WorkspaceView() {
   // Safely hydrate client-side persisted state (profile, chat history) after mount to prevent SSR hydration mismatch
   useEffect(() => {
     const frameId = requestAnimationFrame(() => {
-      // 1. Sync stored profile
+      // 1. Sync stored profile if present in local storage
       const storedProfile = getStoredProfile();
-      setUserProfile(storedProfile);
+      if (storedProfile) {
+        setUserProfile(storedProfile);
+      }
 
       // 2. Sync stored threads and restore active chat state
       const storedThreads = getStoredThreads();
@@ -656,6 +672,12 @@ export default function WorkspaceView() {
   const handleSendMessage = async (userText: string) => {
     if (!userText.trim() || isStreaming) return;
 
+    // Check authentication if Supabase is configured
+    if (isSupabaseConfigured && !user && !isAuthLoading) {
+      setIsSignInModalOpen(true);
+      return;
+    }
+
     // Check credits if model costs credits
     if (selectedModel.costPerQueryCredits > 0 && wallet.credits < selectedModel.costPerQueryCredits) {
       handleOpenPaymentModal('vault');
@@ -709,6 +731,7 @@ export default function WorkspaceView() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
         },
         body: JSON.stringify({
           prompt: userText,
@@ -717,7 +740,7 @@ export default function WorkspaceView() {
           reasoningEffort: currentMode === 'researcher' || selectedModel.supportsThinking ? reasoningEffort : undefined,
           params: workspaceParams,
           buildStack: selectedBuildStack,
-          userSettings: userProfile,
+          userSettings: activeProfile,
           history: messages.slice(-6).map((m) => ({ role: m.role, content: m.content })),
         }),
         signal: abortController.signal,
@@ -1188,7 +1211,10 @@ export default function WorkspaceView() {
           setIsSettingsModalOpen(true);
         }}
         onOpenConnectors={() => setIsConnectorsModalOpen(true)}
-        profile={userProfile}
+        profile={activeProfile}
+        user={user}
+        onOpenSignIn={() => setIsSignInModalOpen(true)}
+        onSignOut={signOut}
       />
 
       {/* Main Workspace Layout with Left Sidebar */}
@@ -1196,8 +1222,11 @@ export default function WorkspaceView() {
         <Sidebar
           isOpen={isSidebarOpen}
           onToggle={() => setIsSidebarOpen((prev) => !prev)}
-          profile={userProfile}
+          profile={activeProfile}
           wallet={wallet}
+          user={user}
+          onOpenSignIn={() => setIsSignInModalOpen(true)}
+          onSignOut={signOut}
           onOpenSettings={(tab) => {
             setSettingsInitialTab(tab || 'profile');
             setIsSettingsModalOpen(true);
@@ -1553,9 +1582,9 @@ export default function WorkspaceView() {
       <SettingsModal
         isOpen={isSettingsModalOpen}
         onClose={() => setIsSettingsModalOpen(false)}
-        profile={userProfile}
+        profile={activeProfile}
         onUpdateProfile={(updates) => {
-          const updated = { ...userProfile, ...updates };
+          const updated = { ...activeProfile, ...updates };
           setUserProfile(updated);
           saveStoredProfile(updated);
         }}
@@ -1570,6 +1599,12 @@ export default function WorkspaceView() {
       <MCPConnectorsModal
         isOpen={isConnectorsModalOpen}
         onClose={() => setIsConnectorsModalOpen(false)}
+      />
+
+      {/* Real Supabase Authentication Modal */}
+      <SignInModal
+        isOpen={isSignInModalOpen}
+        onClose={() => setIsSignInModalOpen(false)}
       />
     </div>
   );

@@ -30,7 +30,10 @@ import {
   Layers,
   ChevronDown,
   ChevronUp,
+  LogIn,
+  LogOut,
 } from 'lucide-react';
+import type { User } from '@supabase/supabase-js';
 import { UserProfileSettings, UserWallet, WorkMode, ChatThread, BuildStack } from '@/lib/types';
 import {
   slugifyAppName,
@@ -57,6 +60,9 @@ interface SidebarProps {
   onDuplicateThread: (threadId: string) => void;
   onExportThread?: (threadId: string, format: 'markdown' | 'json') => void;
   onClearAllThreads?: () => void;
+  user?: User | null;
+  onOpenSignIn?: () => void;
+  onSignOut?: () => void;
 }
 
 // Time store with cached snapshot to satisfy React 19 external time subscription rules
@@ -128,6 +134,9 @@ export default function Sidebar({
   onDuplicateThread,
   onExportThread,
   onClearAllThreads,
+  user,
+  onOpenSignIn,
+  onSignOut,
 }: SidebarProps) {
   const currentTime = useSyncExternalStore(
     nowTimeStore.subscribe,
@@ -873,50 +882,65 @@ export default function Sidebar({
           id="sidebar-bottom-user-widget"
           className="p-2.5 border-t border-[#EAE6DF] bg-[#F5F2EC] flex items-center justify-between"
         >
-          <button
-            id="sidebar-profile-user-trigger"
-            type="button"
-            onClick={() => onOpenSettings('profile')}
-            className="flex-1 flex items-center gap-2.5 p-1 rounded-xl hover:bg-[#EAE6DF] transition-all cursor-pointer text-left truncate group"
-            title="Account Settings & Preferences (Cmd+,)"
-          >
-            <div className="relative shrink-0">
-              <Image
-                src={profile.avatarUrl}
-                alt={profile.fullName}
-                width={32}
-                height={32}
-                className="w-8 h-8 rounded-full object-cover border border-white shadow-2xs group-hover:scale-105 transition-transform"
-                referrerPolicy="no-referrer"
-              />
-              <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-emerald-500 border border-white" />
-            </div>
+          {user ? (
+            <>
+              <button
+                id="sidebar-profile-user-trigger"
+                type="button"
+                onClick={() => onOpenSettings('profile')}
+                className="flex-1 flex items-center gap-2.5 p-1 rounded-xl hover:bg-[#EAE6DF] transition-all cursor-pointer text-left truncate group"
+                title="Account Settings & Preferences (Cmd+,)"
+              >
+                <div className="relative shrink-0">
+                  <Image
+                    src={profile.avatarUrl}
+                    alt={profile.fullName}
+                    width={32}
+                    height={32}
+                    className="w-8 h-8 rounded-full object-cover border border-white shadow-2xs group-hover:scale-105 transition-transform"
+                    referrerPolicy="no-referrer"
+                  />
+                  <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-emerald-500 border border-white" />
+                </div>
 
-            <div className="truncate flex-1">
-              <div className="flex items-center gap-1 truncate">
-                <span className="text-xs font-bold text-[#1F1E1D] truncate group-hover:text-purple-900 transition-colors">
-                  {profile.fullName}
-                </span>
-              </div>
-              <div className="flex items-center gap-1.5 text-[10px] text-[#736E67]">
-                <span className="font-semibold text-emerald-800">{wallet.plan}</span>
-                <span>•</span>
-                <span className="font-mono text-[#858079]">{wallet.credits} Cr</span>
-              </div>
-            </div>
-          </button>
+                <div className="truncate flex-1">
+                  <div className="flex items-center gap-1 truncate">
+                    <span className="text-xs font-bold text-[#1F1E1D] truncate group-hover:text-purple-900 transition-colors">
+                      {profile.fullName}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5 text-[10px] text-[#736E67]">
+                    <span className="font-semibold text-emerald-800">{wallet.plan}</span>
+                    <span>•</span>
+                    <span className="font-mono text-[#858079]">{wallet.credits} Cr</span>
+                  </div>
+                </div>
+              </button>
 
-          {/* Quick Settings Gear Trigger Button */}
-          <button
-            id="sidebar-settings-gear-btn"
-            type="button"
-            onClick={() => onOpenSettings('profile')}
-            className="p-2 rounded-lg hover:bg-[#EAE6DF] text-[#736E67] hover:text-[#1F1E1D] transition-colors cursor-pointer shrink-0 ml-1"
-            title="Open Settings (Cmd+,)"
-            aria-label="Settings"
-          >
-            <Settings className="w-4 h-4" />
-          </button>
+              {/* Quick Settings Gear Trigger Button */}
+              <button
+                id="sidebar-settings-gear-btn"
+                type="button"
+                onClick={() => onOpenSettings('profile')}
+                className="p-2 rounded-lg hover:bg-[#EAE6DF] text-[#736E67] hover:text-[#1F1E1D] transition-colors cursor-pointer shrink-0 ml-1"
+                title="Open Settings (Cmd+,)"
+                aria-label="Settings"
+              >
+                <Settings className="w-4 h-4" />
+              </button>
+            </>
+          ) : (
+            <button
+              id="sidebar-signin-btn"
+              type="button"
+              onClick={onOpenSignIn}
+              className="flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-[#1F1E1D] hover:bg-[#33302C] text-white text-xs font-semibold shadow-xs transition-all cursor-pointer"
+              title="Sign in with Google or GitHub"
+            >
+              <LogIn className="w-4 h-4 text-emerald-400" />
+              <span>Sign In / Sign Up</span>
+            </button>
+          )}
         </div>
 
         {/* Floating Toast Notification Banner */}

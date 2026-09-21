@@ -58,7 +58,7 @@ interface CustomConnectorConfig {
 }
 
 export default function ConnectorsTab() {
-  const [userId] = useState<string>(() => {
+  const [userId, setUserId] = useState<string>(() => {
     if (typeof window !== 'undefined') {
       try {
         const profile = getStoredProfile();
@@ -67,7 +67,7 @@ export default function ConnectorsTab() {
         // Fallback
       }
     }
-    return 'usr_nepal_builder_001';
+    return '';
   });
   const [oauthStatus, setOauthStatus] = useState<OAuthStatusResponse | null>(null);
   const [isLoadingStatus, setIsLoadingStatus] = useState(true);
@@ -111,9 +111,25 @@ export default function ConnectorsTab() {
   const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
+    const checkProfile = () => {
+      const prof = getStoredProfile();
+      if (prof?.id && prof.id !== userId) {
+        setUserId(prof.id);
+      }
+    };
+    checkProfile();
+    window.addEventListener('ai_festa_profile_updated', checkProfile);
+    return () => window.removeEventListener('ai_festa_profile_updated', checkProfile);
+  }, [userId]);
+
+  useEffect(() => {
     let ignore = false;
 
     async function loadStatus() {
+      if (!userId) {
+        setIsLoadingStatus(false);
+        return;
+      }
       try {
         const res = await fetch(`/api/auth/status?userId=${encodeURIComponent(userId)}`);
         if (res.ok) {

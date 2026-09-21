@@ -106,7 +106,7 @@ export interface GoogleDocsActionResult {
 export async function executeGitHubAction(
   action: 'create_pull_request' | 'search_code' | 'list_repos' | 'get_file_contents',
   params: Record<string, unknown>,
-  userId: string = 'usr_nepal_builder_001'
+  userId: string
 ): Promise<GitHubActionResult> {
   // Look up user connection first, fall back to process.env.GITHUB_TOKEN for admin
   const userConn = await getUserConnection(userId, 'github');
@@ -371,7 +371,7 @@ export async function executeGitHubAction(
 export async function executeGoogleDocsAction(
   action: 'create_brief' | 'list_documents' | 'read_document',
   params: Record<string, unknown>,
-  userId: string = 'usr_nepal_builder_001'
+  userId: string
 ): Promise<GoogleDocsActionResult> {
   // Proactively resolves valid user token, auto-refreshing if expired
   const userToken = await getValidGoogleToken(userId);
@@ -585,7 +585,7 @@ export async function executeGoogleDocsAction(
 export async function executeGmailAction(
   action: 'list_threads' | 'read_thread' | 'draft_response',
   params: Record<string, unknown>,
-  userId: string = 'usr_nepal_builder_001'
+  userId: string
 ): Promise<GmailActionResult> {
   // Proactively resolves valid user token, auto-refreshing if expired
   const userToken = await getValidGoogleToken(userId);
@@ -830,7 +830,7 @@ export async function executeMCPTool(
   server: string,
   tool: string,
   args: Record<string, unknown> = {},
-  userId: string = 'usr_nepal_builder_001'
+  userId: string
 ): Promise<{ success: boolean; result: unknown; message: string }> {
   try {
     if (server === 'github' || tool.startsWith('github_')) {

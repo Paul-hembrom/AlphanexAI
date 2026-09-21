@@ -9,6 +9,9 @@ import {
   formatSerperResultsForGrounding,
   isResearchQuery,
 } from '@/lib/serper';
+import { createClient, isSupabaseServerConfigured } from '@/lib/supabase/server';
+import { createAdminClient, isAdminConfigured } from '@/lib/supabase/admin';
+import { recordTokenUsage, checkPlanLimits, touchActiveSession } from '@/lib/usage-tracking';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -34,10 +37,104 @@ export async function POST(
 
   const encoder = new TextEncoder();
 
+  // 1. Authenticate user from Supabase cookie session or Authorization header
+  let authenticatedUserId: string | null = null;
+
+  if (isSupabaseServerConfigured()) {
+    try {
+      const supabaseServer = await createClient();
+      const { data: { user } } = await supabaseServer.auth.getUser();
+      if (user) authenticatedUserId = user.id;
+    } catch (authErr) {
+      console.warn('[chat/route] Could not resolve session from cookie:', authErr);
+    }
+  }
+
+  if (!authenticatedUserId) {
+    const authHeader = req.headers.get('authorization');
+    if (authHeader?.startsWith('Bearer ') && isAdminConfigured()) {
+      try {
+        const admin = createAdminClient();
+        const token = authHeader.substring(7);
+        const { data: { user } } = await admin.auth.getUser(token);
+        if (user) authenticatedUserId = user.id;
+      } catch {}
+    }
+  }
+
+  // 2. Reject unauthenticated requests if Supabase is configured
+  if (isSupabaseServerConfigured() && !authenticatedUserId) {
+    return new Response(
+      `data: ${JSON.stringify({
+        type: 'content',
+        content: `### 🔒 Sign In Required\n\nPlease sign in with your account to chat and use AlphanexAI models.`,
+      })}\n\ndata: ${JSON.stringify({
+        type: 'done',
+        modelId,
+        routedModel: modelId,
+        provider: 'AlphanexAI Auth',
+        tokens: { promptTokens: 0, completionTokens: 0, totalTokens: 0, estimatedCostCredits: 0 },
+      })}\n\n`,
+      {
+        headers: {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          Connection: 'keep-alive',
+        },
+      }
+    );
+  }
+
+  // 3. Check monthly plan token limit and concurrent sessions
+  if (authenticatedUserId) {
+    const limitCheck = await checkPlanLimits(authenticatedUserId);
+    if (!limitCheck.allowed) {
+      return new Response(
+        `data: ${JSON.stringify({
+          type: 'content',
+          content: `### ⚠️ Quota Notice\n\n${limitCheck.message}`,
+        })}\n\ndata: ${JSON.stringify({
+          type: 'done',
+          modelId,
+          routedModel: modelId,
+          provider: 'AlphanexAI Usage Engine',
+          tokens: { promptTokens: 0, completionTokens: 0, totalTokens: 0, estimatedCostCredits: 0 },
+        })}\n\n`,
+        {
+          headers: {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+            Connection: 'keep-alive',
+          },
+        }
+      );
+    }
+    touchActiveSession(authenticatedUserId).catch(() => {});
+  }
+
   // Create a ReadableStream for SSE
   const stream = new ReadableStream({
     async start(controller) {
       const sendEvent = (data: Record<string, unknown>) => {
+        if (data.type === 'done' && authenticatedUserId) {
+          const tokensObj = (data.tokens || data.tokensUsed || {}) as Record<string, unknown>;
+          const promptTokens = Number(tokensObj.promptTokens) || Math.round(prompt.length / 4);
+          const completionTokens = Number(tokensObj.completionTokens) || 0;
+          const totalTokens = Number(tokensObj.totalTokens) || (promptTokens + completionTokens);
+          const costCredits = Number(tokensObj.estimatedCostCredits) || 1;
+          const usedModelId = (data.routedModel as string) || (data.modelId as string) || modelId;
+
+          recordTokenUsage({
+            userId: authenticatedUserId,
+            modelId: usedModelId,
+            promptTokens,
+            completionTokens,
+            totalTokens,
+            costCredits,
+            mode,
+          }).catch((err) => console.error('[token_usage_log] Failed to record:', err));
+        }
+
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
       };
 
