@@ -12,7 +12,6 @@ export interface MCPServerConfig {
   name: string;
   url: string;
   headers?: Record<string, string>;
-  /** Optional label shown in tool descriptions */
   description?: string;
 }
 
@@ -23,22 +22,16 @@ export interface DiscoveredTool {
   inputSchema: Record<string, unknown>;
 }
 
-/**
- * Default MCP servers for the research agent.
- *
- * - GitHub: official remote MCP server (OAuth via PAT or GitHub App token)
- * - Gmail: Google's hosted MCP endpoint (Developer Preview, requires allowlisting)
- * - Google Docs: self-hosted or community MCP server
- */
-export function defaultMCPServers(): MCPServerConfig[] {
+export function defaultMCPServers(githubToken?: string | null): MCPServerConfig[] {
   const servers: MCPServerConfig[] = [];
+  const token = githubToken || process.env.GITHUB_TOKEN;
 
-  if (process.env.GITHUB_TOKEN) {
+  if (token) {
     servers.push({
       name: 'github',
       url: process.env.GITHUB_MCP_URL ?? 'https://api.githubcopilot.com/mcp/',
       headers: {
-        Authorization: `Bearer ${process.env.GITHUB_TOKEN}`,
+        Authorization: `Bearer ${token}`,
         'X-MCP-Readonly': process.env.GITHUB_MCP_READONLY ?? 'true',
       },
       description: 'GitHub repositories, issues, pull requests, and code search',
@@ -77,7 +70,6 @@ export class MCPClientManager {
 
   constructor(private servers: MCPServerConfig[]) {}
 
-  /** Connect to every configured MCP server. Idempotent. */
   async connectAll(): Promise<void> {
     if (this.connected) return;
 
@@ -95,7 +87,7 @@ export class MCPClientManager {
         await client.connect(transport);
         this.clients.set(cfg.name, client);
         this.configs.set(cfg.name, cfg);
-        console.log(`✅ MCP connected: ${cfg.name} (${cfg.url})`);
+        console.log(`MCP connected: ${cfg.name} (${cfg.url})`);
       })
     );
 
@@ -103,7 +95,7 @@ export class MCPClientManager {
       const r = results[i];
       if (r.status === 'rejected') {
         console.warn(
-          `⚠️ MCP connection failed for '${this.servers[i].name}':`,
+          `MCP connection failed for '${this.servers[i].name}':`,
           (r as PromiseRejectedResult).reason?.message ?? (r as PromiseRejectedResult).reason
         );
       }
@@ -112,7 +104,6 @@ export class MCPClientManager {
     this.connected = true;
   }
 
-  /** Discover all tools across every connected server. */
   async listAllTools(): Promise<DiscoveredTool[]> {
     await this.connectAll();
     const all: DiscoveredTool[] = [];
@@ -132,17 +123,13 @@ export class MCPClientManager {
           });
         }
       } catch (e) {
-        console.warn(`⚠️ listTools failed for '${serverName}':`, e);
+        console.warn(`listTools failed for '${serverName}':`, e);
       }
     }
 
     return all;
   }
 
-  /**
-   * Call an MCP tool. The `serverName` is the logical name from config
-   * (e.g. "github", "gmail", "google-docs").
-   */
   async callTool(
     serverName: string,
     toolName: string,
@@ -157,13 +144,12 @@ export class MCPClientManager {
     return result;
   }
 
-  /** Disconnect all clients. Call on shutdown if you own the process. */
   async closeAll(): Promise<void> {
     for (const [name, client] of this.clients) {
       try {
         await client.close();
       } catch (e) {
-        console.warn(`⚠️ Failed to close MCP client '${name}':`, e);
+        console.warn(`Failed to close MCP client '${name}':`, e);
       }
     }
     this.clients.clear();
@@ -180,15 +166,14 @@ export class MCPClientManager {
   }
 }
 
-/**
- * Module-level singleton so the Next.js route handler reuses connections
- * across requests in the same process.
- */
 let _manager: MCPClientManager | null = null;
+let _managerToken: string | null = null;
 
-export function getMCPManager(): MCPClientManager {
-  if (!_manager) {
-    _manager = new MCPClientManager(defaultMCPServers());
+export function getMCPManager(githubToken?: string | null): MCPClientManager {
+  const token = githubToken || process.env.GITHUB_TOKEN || null;
+  if (!_manager || _managerToken !== token) {
+    _manager = new MCPClientManager(defaultMCPServers(token));
+    _managerToken = token;
   }
   return _manager;
 }

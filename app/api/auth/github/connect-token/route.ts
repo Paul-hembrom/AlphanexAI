@@ -19,7 +19,6 @@ export async function POST(req: NextRequest) {
 
     const cleanToken = token.trim();
 
-    // Verify token with GitHub API
     const userRes = await fetch('https://api.github.com/user', {
       headers: {
         Authorization: `Bearer ${cleanToken}`,
@@ -53,10 +52,12 @@ export async function POST(req: NextRequest) {
     }
 
     if (!userId) {
-      userId = `usr_gh_${userData.login}`;
+      return NextResponse.json(
+        { success: false, error: 'Sign in first so the GitHub token can be bound to your account.' },
+        { status: 401 }
+      );
     }
 
-    // Save connection
     await upsertUserConnection({
       userId,
       provider: 'github',
