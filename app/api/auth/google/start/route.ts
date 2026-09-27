@@ -6,8 +6,9 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 function getBaseUrl(req: NextRequest): string {
-  if (process.env.APP_URL && process.env.APP_URL !== 'MY_APP_URL' && !process.env.APP_URL.includes('localhost')) {
-    return process.env.APP_URL.replace(/\/$/, '');
+  const appUrl = process.env.APP_URL;
+  if (appUrl && appUrl.startsWith('http') && !appUrl.includes('MY_APP_URL')) {
+    return appUrl.replace(/\/$/, '');
   }
   const proto = req.headers.get('x-forwarded-proto') || 'https';
   const host = req.headers.get('x-forwarded-host') || req.headers.get('host');
@@ -21,12 +22,17 @@ export async function GET(req: NextRequest) {
   const searchParams = req.nextUrl.searchParams;
   let userId = searchParams.get('userId');
 
-  if (!userId && isSupabaseServerConfigured()) {
+  if (isSupabaseServerConfigured()) {
     try {
       const supabase = await createClient();
       const { data: { user } } = await supabase.auth.getUser();
       if (user) userId = user.id;
     } catch {}
+  }
+
+  // Reject guest IDs and unauthenticated requests
+  if (userId && (userId.startsWith('usr_guest') || userId === 'guest-default')) {
+    userId = null;
   }
 
   const format = searchParams.get('format');

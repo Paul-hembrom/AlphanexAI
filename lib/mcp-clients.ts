@@ -30,15 +30,16 @@ export interface DiscoveredTool {
  * - Gmail: Google's hosted MCP endpoint (Developer Preview, requires allowlisting)
  * - Google Docs: self-hosted or community MCP server
  */
-export function defaultMCPServers(): MCPServerConfig[] {
+export function defaultMCPServers(githubToken?: string | null): MCPServerConfig[] {
   const servers: MCPServerConfig[] = [];
+  const effectiveGithubToken = githubToken || process.env.GITHUB_TOKEN;
 
-  if (process.env.GITHUB_TOKEN) {
+  if (effectiveGithubToken && effectiveGithubToken.trim()) {
     servers.push({
       name: 'github',
       url: process.env.GITHUB_MCP_URL ?? 'https://api.githubcopilot.com/mcp/',
       headers: {
-        Authorization: `Bearer ${process.env.GITHUB_TOKEN}`,
+        Authorization: `Bearer ${effectiveGithubToken.trim()}`,
         'X-MCP-Readonly': process.env.GITHUB_MCP_READONLY ?? 'true',
       },
       description: 'GitHub repositories, issues, pull requests, and code search',
@@ -185,10 +186,16 @@ export class MCPClientManager {
  * across requests in the same process.
  */
 let _manager: MCPClientManager | null = null;
+let _lastGithubToken: string | null | undefined = undefined;
 
-export function getMCPManager(): MCPClientManager {
-  if (!_manager) {
-    _manager = new MCPClientManager(defaultMCPServers());
+export function getMCPManager(githubToken?: string | null): MCPClientManager {
+  const currentToken = githubToken || null;
+  if (!_manager || _lastGithubToken !== currentToken) {
+    if (_manager) {
+      _manager.closeAll().catch(() => {});
+    }
+    _lastGithubToken = currentToken;
+    _manager = new MCPClientManager(defaultMCPServers(currentToken));
   }
   return _manager;
 }

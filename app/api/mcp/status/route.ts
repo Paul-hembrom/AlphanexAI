@@ -1,5 +1,7 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { getMCPManager } from '@/lib/mcp-clients';
+import { getUserConnectionsStatus, getValidGitHubToken } from '@/lib/user-connections';
+import { createClient, isSupabaseServerConfigured } from '@/lib/supabase/server';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -61,9 +63,33 @@ const BUILTIN_TOOLS = [
   },
 ];
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
-    const manager = getMCPManager();
+    let userId: string | null = null;
+    if (isSupabaseServerConfigured()) {
+      try {
+        const supabase = await createClient();
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) userId = user.id;
+      } catch {}
+    }
+
+    if (!userId) {
+      const qUserId = req.nextUrl.searchParams.get('userId') || req.headers.get('x-user-id');
+      if (qUserId && !qUserId.startsWith('usr_guest') && qUserId !== 'guest-default') {
+        userId = qUserId;
+      }
+    }
+
+    // Resolve real user connection status - never report connected if user has no token
+    const connStatus = userId ? await getUserConnectionsStatus(userId) : null;
+    const githubConnected = Boolean(connStatus?.github.connected);
+    const googleConnected = Boolean(connStatus?.google.connected);
+
+    // Resolve token for MCP manager
+    const githubToken = userId && githubConnected ? await getValidGitHubToken(userId) : null;
+    const manager = getMCPManager(githubToken);
+
     await manager.connectAll().catch(() => {});
     const remoteTools = (await manager.listAllTools().catch(() => [])) || [];
 
@@ -87,30 +113,36 @@ export async function GET() {
     return NextResponse.json({
       status: 'operational',
       success: true,
-      connected: true,
+      userId: userId || null,
+      connected: githubConnected || googleConnected,
       servers: ['github', 'google-docs', 'gmail', ...manager.serverNames],
       configuredServers: {
-        github: Boolean(process.env.GITHUB_TOKEN),
-        gmail: Boolean(process.env.GMAIL_MCP_TOKEN),
-        googleDocs: Boolean(process.env.GDOCS_MCP_URL),
+        github: githubConnected,
+        gmail: googleConnected,
+        googleDocs: googleConnected,
       },
       discoveredToolsCount: toolsList.length,
       total_tools_discovered: toolsList.length,
       tools: toolsList,
       integrations: {
         github: {
-          status: 'ready',
-          tokenPresent: Boolean(process.env.GITHUB_TOKEN),
+          status: githubConnected ? 'ready' : 'disconnected',
+          tokenPresent: githubConnected,
+          username: connStatus?.github.username || null,
+          scopes: connStatus?.github.scopes || null,
+          source: connStatus?.github.source || 'none',
           capabilities: ['PR Automation', 'Repository Search', 'Code Inspection'],
         },
         googleDocs: {
-          status: 'ready',
-          tokenPresent: Boolean(process.env.GDOCS_MCP_URL || process.env.GDOCS_MCP_TOKEN),
+          status: googleConnected ? 'ready' : 'disconnected',
+          tokenPresent: googleConnected,
+          source: connStatus?.google.source || 'none',
           capabilities: ['Brief Export', 'Document Reading', 'Drive Search'],
         },
         gmail: {
-          status: 'ready',
-          tokenPresent: Boolean(process.env.GMAIL_MCP_TOKEN),
+          status: googleConnected ? 'ready' : 'disconnected',
+          tokenPresent: googleConnected,
+          source: connStatus?.google.source || 'none',
           capabilities: ['Thread Ingestion', 'Incident Search', 'Draft Composition'],
         },
       },
@@ -118,8 +150,8 @@ export async function GET() {
   } catch (error: any) {
     return NextResponse.json({
       status: 'operational',
-      success: true,
-      connected: true,
+      success: false,
+      connected: false,
       servers: ['github', 'google-docs', 'gmail'],
       discoveredToolsCount: BUILTIN_TOOLS.length,
       total_tools_discovered: BUILTIN_TOOLS.length,

@@ -11,11 +11,12 @@ export async function POST(req: NextRequest) {
     const body = await req.json().catch(() => ({}));
     let {
       action = 'create_brief',
-      userId = req.headers.get('x-user-id') || req.nextUrl.searchParams.get('userId'),
+      userId: bodyUserId,
       ...params
     } = body;
 
-    if (!userId && isSupabaseServerConfigured()) {
+    let userId: string | null = null;
+    if (isSupabaseServerConfigured()) {
       try {
         const supabase = await createClient();
         const { data: { user } } = await supabase.auth.getUser();
@@ -24,14 +25,29 @@ export async function POST(req: NextRequest) {
     }
 
     if (!userId) {
+      const fallback = bodyUserId || req.headers.get('x-user-id') || req.nextUrl.searchParams.get('userId');
+      if (fallback && !fallback.startsWith('usr_guest') && fallback !== 'guest-default') {
+        userId = fallback;
+      }
+    }
+
+    if (!userId) {
       return NextResponse.json(
-        { success: false, error: 'Authentication required. Please sign in.' },
+        { success: false, needsAuth: true, error: 'Authentication required. Please sign in to access Google Docs.' },
         { status: 401 }
       );
     }
 
     const result = await executeGoogleDocsAction(action, params, userId);
-    return NextResponse.json(result);
+    const status = result.success
+      ? 200
+      : result.needsAuth
+      ? 401
+      : result.status && result.status >= 400 && result.status < 600
+      ? result.status
+      : 400;
+
+    return NextResponse.json(result, { status });
   } catch (error: any) {
     return NextResponse.json(
       {

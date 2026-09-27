@@ -44,7 +44,7 @@ export async function POST(req: NextRequest) {
     const scopesHeader = userRes.headers.get('x-oauth-scopes') || 'repo,read:user';
 
     let userId = passedUserId;
-    if (!userId && isSupabaseServerConfigured()) {
+    if (isSupabaseServerConfigured()) {
       try {
         const supabase = await createClient();
         const { data: { user } } = await supabase.auth.getUser();
@@ -52,8 +52,16 @@ export async function POST(req: NextRequest) {
       } catch {}
     }
 
-    if (!userId) {
-      userId = `usr_gh_${userData.login}`;
+    // Must be bound to a real Supabase auth user; never invent a pseudo guest ID
+    if (!userId || userId.startsWith('usr_guest') || userId === 'guest-default') {
+      return NextResponse.json(
+        {
+          success: false,
+          needsAuth: true,
+          error: 'Authentication required. Please sign in with your AlphanexAI account before connecting a GitHub token.',
+        },
+        { status: 401 }
+      );
     }
 
     // Save connection

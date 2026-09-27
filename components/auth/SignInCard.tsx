@@ -99,12 +99,13 @@ export default function SignInCard({
       const redirectTo = `${origin}/auth/callback`;
       const isInsideIframe = typeof window !== 'undefined' && window.self !== window.top;
 
+      // Supabase dashboard GitHub auth provider must also have the 'repo' scope enabled so identity login can power repo connectors
       const { data, error } = await client.auth.signInWithOAuth({
         provider,
         options: {
           redirectTo,
           skipBrowserRedirect: isInsideIframe,
-          scopes: provider === 'github' ? 'read:user user:email' : undefined,
+          scopes: provider === 'github' ? 'read:user user:email repo' : undefined,
         },
       });
 

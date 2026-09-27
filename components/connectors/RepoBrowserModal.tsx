@@ -63,15 +63,19 @@ export default function RepoBrowserModal({
   onAttachFiles,
   userId: propUserId,
 }: RepoBrowserModalProps) {
-  const [resolvedUserId, setResolvedUserId] = useState<string>(() => {
-    if (propUserId) return propUserId;
+  const [resolvedUserId, setResolvedUserId] = useState<string | null>(() => {
+    if (propUserId && !propUserId.startsWith('usr_guest') && propUserId !== 'guest-default') {
+      return propUserId;
+    }
     if (typeof window !== 'undefined') {
       try {
         const prof = getStoredProfile();
-        if (prof?.id) return prof.id;
+        if (prof?.id && !prof.id.startsWith('usr_guest') && prof.id !== 'guest-default') {
+          return prof.id;
+        }
       } catch {}
     }
-    return 'usr_guest_local';
+    return null;
   });
 
   // Connection & Auth State
@@ -109,13 +113,35 @@ export default function RepoBrowserModal({
   const [isAttaching, setIsAttaching] = useState(false);
   const [attachProgress, setAttachProgress] = useState<{ current: number; total: number; filename: string } | null>(null);
 
+  // Connect OAuth via popup
+  const handleConnectOAuth = () => {
+    const width = 600;
+    const height = 700;
+    const left = window.screenX + (window.outerWidth - width) / 2;
+    const top = window.screenY + (window.outerHeight - height) / 2;
+    const url = resolvedUserId
+      ? `/api/auth/github/start?userId=${encodeURIComponent(resolvedUserId)}`
+      : '/api/auth/github/start';
+    window.open(
+      url,
+      'alphanex_oauth_popup',
+      `width=${width},height=${height},left=${left},top=${top},toolbar=no,menubar=no`
+    );
+  };
+
   // 1. Check GitHub OAuth / Connection Status
   const checkAuthStatus = useCallback(async () => {
     setIsCheckingAuth(true);
     try {
-      const res = await fetch(`/api/auth/status?userId=${encodeURIComponent(resolvedUserId)}`);
+      const url = resolvedUserId
+        ? `/api/auth/status?userId=${encodeURIComponent(resolvedUserId)}`
+        : '/api/auth/status';
+      const res = await fetch(url);
       if (res.ok) {
         const data = await res.json();
+        if (data?.userId && !resolvedUserId) {
+          setResolvedUserId(data.userId);
+        }
         const gh = data?.connections?.github;
         if (gh?.connected) {
           setGithubConnected(true);
@@ -149,19 +175,32 @@ export default function RepoBrowserModal({
       });
       const data = await res.json();
       if (data.success && Array.isArray(data.data)) {
-        setRepos(data.data);
-        if (data.tokenSource && data.tokenSource.includes('User OAuth')) {
+        // Discard any fake dummy repos if somehow encountered
+        const hasFakeRepo = data.data.some((r: any) => r.fullName?.includes('nepal-devs'));
+        if (hasFakeRepo) {
+          setGithubConnected(false);
+          setRepos([]);
+          setRepoError('GitHub is not connected. Connect OAuth with repo scope or paste a Personal Access Token.');
+        } else {
+          setRepos(data.data);
           setGithubConnected(true);
+          if (data.data.length > 0 && data.data[0].owner && !connectedUsername) {
+            setConnectedUsername(data.data[0].owner);
+          }
         }
       } else {
-        setRepoError(data.error || 'Failed to list repositories');
+        setGithubConnected(false);
+        setRepos([]);
+        setRepoError(data.error || 'GitHub is not connected. Connect OAuth or paste a Personal Access Token.');
       }
     } catch (err: any) {
+      setGithubConnected(false);
+      setRepos([]);
       setRepoError(err?.message || 'Error fetching repositories');
     } finally {
       setIsLoadingRepos(false);
     }
-  }, [resolvedUserId]);
+  }, [resolvedUserId, connectedUsername]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -174,8 +213,23 @@ export default function RepoBrowserModal({
       }
     };
     initializeModal();
+
+    // Listen for postMessage from OAuth popup
+    const handleMessage = (event: MessageEvent) => {
+      if (
+        event.data?.type === 'OAUTH_AUTH_SUCCESS' ||
+        event.data?.type === 'SUPABASE_AUTH_SUCCESS'
+      ) {
+        console.log('[repo-browser] OAuth message received, refreshing repository list');
+        checkAuthStatus();
+        fetchRepos();
+      }
+    };
+
+    window.addEventListener('message', handleMessage);
     return () => {
       isMounted = false;
+      window.removeEventListener('message', handleMessage);
     };
   }, [isOpen, checkAuthStatus, fetchRepos]);
 
@@ -492,9 +546,9 @@ export default function RepoBrowserModal({
                 Connected as <strong className="font-semibold">@{connectedUsername}</strong>
               </span>
             ) : (
-              <span className="flex items-center gap-1.5 font-medium text-amber-800 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200">
-                <AlertCircle className="w-3.5 h-3.5 text-amber-600" />
-                Not authenticated (Sample manifest loaded)
+              <span className="flex items-center gap-1.5 font-medium text-zinc-700 bg-zinc-100 px-2 py-0.5 rounded-md border border-zinc-200">
+                <AlertCircle className="w-3.5 h-3.5 text-zinc-500" />
+                Not connected
               </span>
             )}
           </div>
@@ -502,13 +556,14 @@ export default function RepoBrowserModal({
           <div className="flex items-center gap-2">
             {!githubConnected && (
               <>
-                <a
-                  href={`/api/auth/github/start?userId=${encodeURIComponent(resolvedUserId)}`}
-                  className="px-2.5 py-1 rounded-lg bg-[#1F1E1D] text-white font-medium hover:bg-black transition-colors flex items-center gap-1"
+                <button
+                  type="button"
+                  onClick={handleConnectOAuth}
+                  className="px-2.5 py-1 rounded-lg bg-[#1F1E1D] text-white font-medium hover:bg-black transition-colors flex items-center gap-1 cursor-pointer"
                 >
                   <Github className="w-3 h-3" />
                   <span>Connect OAuth</span>
-                </a>
+                </button>
                 <button
                   onClick={() => setShowPatInput(!showPatInput)}
                   className="px-2.5 py-1 rounded-lg border border-[#D5D0C7] bg-[#FBF9F5] text-[#1F1E1D] font-medium hover:bg-[#EFECE6] transition-colors flex items-center gap-1 cursor-pointer"

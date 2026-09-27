@@ -47,7 +47,7 @@ function getSupabaseClient(): SupabaseClient | null {
 }
 
 // ---------------------------------------------------------------------------
-// Resilient File Store (Persistent on container disk)
+// Resilient File Store (Persistent cache on container disk)
 // ---------------------------------------------------------------------------
 const DATA_DIR = path.join(process.cwd(), '.data');
 const DATA_FILE = path.join(DATA_DIR, 'user_connections.json');
@@ -84,9 +84,14 @@ export async function getUserConnection(
   userId: string,
   provider: 'github' | 'google'
 ): Promise<UserConnection | null> {
+  // Reject guest IDs or missing IDs
+  if (!userId || userId.startsWith('usr_guest') || userId === 'guest-default') {
+    return null;
+  }
+
   const sb = getSupabaseClient();
 
-  // 1. Try Supabase first if available
+  // 1. Try Supabase first if available (source of truth)
   if (sb) {
     try {
       const { data, error } = await sb
@@ -116,13 +121,9 @@ export async function getUserConnection(
     }
   }
 
-  // 2. Fallback to resilient encrypted local store
+  // 2. Fallback to resilient encrypted local store (cache) strictly matching THIS userId
   const localRecords = readLocalEncryptedStore();
-  let match = localRecords.find((r) => r.user_id === userId && r.provider === provider);
-  if (!match) {
-    // If no exact match for this userId, check for any stored connection for this provider
-    match = localRecords.find((r) => r.provider === provider);
-  }
+  const match = localRecords.find((r) => r.user_id === userId && r.provider === provider);
   if (match) {
     return {
       id: match.id,
@@ -145,6 +146,10 @@ export async function getUserConnection(
 export async function upsertUserConnection(
   conn: Omit<UserConnection, 'connectedAt'> & { connectedAt?: string }
 ): Promise<UserConnection> {
+  if (!conn.userId || conn.userId.startsWith('usr_guest') || conn.userId === 'guest-default') {
+    throw new Error('Cannot bind token to a guest or unauthenticated user ID. Authentication required.');
+  }
+
   const now = new Date().toISOString();
   const connectedAt = conn.connectedAt || now;
   const updatedAt = now;
@@ -163,7 +168,7 @@ export async function upsertUserConnection(
     account_email: conn.accountEmail,
   };
 
-  // 1. Persist to local store for offline resilience
+  // 1. Persist to local cache
   const localRecords = readLocalEncryptedStore();
   const existingIdx = localRecords.findIndex(
     (r) => r.user_id === conn.userId && r.provider === conn.provider
@@ -180,30 +185,34 @@ export async function upsertUserConnection(
   }
   writeLocalEncryptedStore(localRecords);
 
-  // 2. Upsert to Supabase if available
-  const sb = getSupabaseClient();
-  if (sb) {
-    try {
-      const { error } = await sb.from('user_connections').upsert(
-        {
-          user_id: conn.userId,
-          provider: conn.provider,
-          access_token: encryptedRecord.access_token,
-          refresh_token: encryptedRecord.refresh_token,
-          scopes: conn.scopes,
-          expires_at: conn.expiresAt || null,
-          connected_at: connectedAt,
-          updated_at: updatedAt,
-          account_username: conn.accountUsername,
-          account_email: conn.accountEmail,
-        },
-        { onConflict: 'user_id,provider' }
-      );
-      if (error) {
-        console.warn('[user-connections] Supabase upsert note:', error.message);
+  // 2. Source of truth: Supabase table user_connections via service-role admin client
+  if (!isAdminConfigured()) {
+    console.warn('[user-connections] Supabase admin client not configured. Local cache saved, but server configuration is incomplete.');
+  } else {
+    const sb = getSupabaseClient();
+    if (sb) {
+      try {
+        const { error } = await sb.from('user_connections').upsert(
+          {
+            user_id: conn.userId,
+            provider: conn.provider,
+            access_token: encryptedRecord.access_token,
+            refresh_token: encryptedRecord.refresh_token,
+            scopes: conn.scopes,
+            expires_at: conn.expiresAt || null,
+            connected_at: connectedAt,
+            updated_at: updatedAt,
+            account_username: conn.accountUsername,
+            account_email: conn.accountEmail,
+          },
+          { onConflict: 'user_id,provider' }
+        );
+        if (error) {
+          console.warn('[user-connections] Supabase upsert note:', error.message);
+        }
+      } catch (e) {
+        console.warn('[user-connections] Supabase upsert exception:', e);
       }
-    } catch (e) {
-      console.warn('[user-connections] Supabase upsert exception:', e);
     }
   }
 
@@ -212,6 +221,26 @@ export async function upsertUserConnection(
     connectedAt,
     updatedAt,
   };
+}
+
+export async function persistOAuthProviderToken(params: {
+  userId: string;
+  provider: 'github' | 'google';
+  accessToken: string;
+  refreshToken?: string | null;
+  scopes?: string;
+  accountUsername?: string;
+  accountEmail?: string;
+}): Promise<UserConnection> {
+  return upsertUserConnection({
+    userId: params.userId,
+    provider: params.provider,
+    accessToken: params.accessToken,
+    refreshToken: params.refreshToken || null,
+    scopes: params.scopes,
+    accountUsername: params.accountUsername,
+    accountEmail: params.accountEmail,
+  });
 }
 
 export async function deleteUserConnection(
@@ -243,27 +272,49 @@ export async function deleteUserConnection(
 }
 
 export async function getUserConnectionsStatus(userId: string) {
+  if (!userId || userId.startsWith('usr_guest') || userId === 'guest-default') {
+    return {
+      github: {
+        connected: false,
+        connectedAt: null,
+        username: null,
+        scopes: null,
+        source: 'none',
+      },
+      google: {
+        connected: false,
+        connectedAt: null,
+        email: null,
+        scopes: null,
+        source: 'none',
+      },
+      hasCredentials: {
+        github: !!(process.env.GITHUB_OAUTH_CLIENT_ID && process.env.GITHUB_OAUTH_CLIENT_SECRET),
+        google: !!(process.env.GOOGLE_OAUTH_CLIENT_ID && process.env.GOOGLE_OAUTH_CLIENT_SECRET),
+      },
+    };
+  }
+
   const github = await getUserConnection(userId, 'github');
   const google = await getUserConnection(userId, 'google');
 
+  const githubConnected = !!(github && github.accessToken);
+  const googleConnected = !!(google && google.accessToken);
+
   return {
     github: {
-      connected: !!github && !!github.accessToken,
+      connected: githubConnected,
       connectedAt: github?.connectedAt || null,
       username: github?.accountUsername || null,
       scopes: github?.scopes || null,
-      source: github ? 'user_oauth' : process.env.GITHUB_TOKEN ? 'env_token' : 'none',
+      source: githubConnected ? 'user_oauth' : 'none',
     },
     google: {
-      connected: !!google && !!google.accessToken,
+      connected: googleConnected,
       connectedAt: google?.connectedAt || null,
       email: google?.accountEmail || null,
       scopes: google?.scopes || null,
-      source: google
-        ? 'user_oauth'
-        : process.env.GMAIL_MCP_TOKEN || process.env.GDOCS_MCP_TOKEN
-        ? 'env_token'
-        : 'none',
+      source: googleConnected ? 'user_oauth' : 'none',
     },
     hasCredentials: {
       github: !!(process.env.GITHUB_OAUTH_CLIENT_ID && process.env.GITHUB_OAUTH_CLIENT_SECRET),
@@ -277,29 +328,33 @@ export async function getUserConnectionsStatus(userId: string) {
 // ---------------------------------------------------------------------------
 
 export async function getValidGitHubToken(userId: string): Promise<string | null> {
-  const conn = await getUserConnection(userId, 'github');
-  if (conn && conn.accessToken) {
-    return conn.accessToken;
+  if (userId && !userId.startsWith('usr_guest') && userId !== 'guest-default') {
+    const conn = await getUserConnection(userId, 'github');
+    if (conn && conn.accessToken) {
+      return conn.accessToken;
+    }
   }
   // Admin/testing fallback only
   return process.env.GITHUB_TOKEN || null;
 }
 
 export async function getValidGoogleToken(userId: string): Promise<string | null> {
-  const conn = await getUserConnection(userId, 'google');
+  if (userId && !userId.startsWith('usr_guest') && userId !== 'guest-default') {
+    const conn = await getUserConnection(userId, 'google');
 
-  if (conn && conn.accessToken) {
-    // Check if token expires within 2 minutes (120,000 ms)
-    const isExpired = conn.expiresAt && conn.expiresAt < Date.now() + 120 * 1000;
+    if (conn && conn.accessToken) {
+      // Check if token expires within 2 minutes (120,000 ms)
+      const isExpired = conn.expiresAt && conn.expiresAt < Date.now() + 120 * 1000;
 
-    if (isExpired && conn.refreshToken) {
-      console.log(`[user-connections] Google token for user ${userId} expired or expiring soon, refreshing...`);
-      const refreshedToken = await refreshGoogleAccessToken(userId, conn.refreshToken, conn.scopes);
-      if (refreshedToken) {
-        return refreshedToken;
+      if (isExpired && conn.refreshToken) {
+        console.log(`[user-connections] Google token for user ${userId} expired or expiring soon, refreshing...`);
+        const refreshedToken = await refreshGoogleAccessToken(userId, conn.refreshToken, conn.scopes);
+        if (refreshedToken) {
+          return refreshedToken;
+        }
       }
+      return conn.accessToken;
     }
-    return conn.accessToken;
   }
 
   // Admin / testing fallback only
@@ -348,7 +403,7 @@ async function refreshGoogleAccessToken(
       userId,
       provider: 'google',
       accessToken: newAccessToken,
-      refreshToken: data.refresh_token || refreshToken, // Google might send a new one or keep existing
+      refreshToken: data.refresh_token || refreshToken,
       scopes: data.scope || existingScopes || existing?.scopes,
       expiresAt: newExpiresAt,
       connectedAt: existing?.connectedAt,

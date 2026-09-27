@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient, isSupabaseServerConfigured } from '@/lib/supabase/server';
+import { persistOAuthProviderToken } from '@/lib/user-connections';
 
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
@@ -9,8 +10,38 @@ export async function GET(request: Request) {
   if (code && isSupabaseServerConfigured()) {
     try {
       const supabase = await createClient();
-      const { error } = await supabase.auth.exchangeCodeForSession(code);
-      if (!error) {
+      const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+      if (!error && data?.session) {
+        const session = data.session;
+        const user = session.user;
+        const providerToken = session.provider_token;
+        const providerRefreshToken = session.provider_refresh_token;
+
+        // If this was an OAuth login with provider token (GitHub or Google), persist into user_connections
+        if (providerToken && user?.id) {
+          const provider = (user.app_metadata?.provider || '') as 'github' | 'google';
+          if (provider === 'github' || provider === 'google') {
+            try {
+              await persistOAuthProviderToken({
+                userId: user.id,
+                provider,
+                accessToken: providerToken,
+                refreshToken: providerRefreshToken || null,
+                scopes: provider === 'github' ? 'repo read:user user:email' : undefined,
+                accountUsername:
+                  user.user_metadata?.user_name ||
+                  user.user_metadata?.preferred_username ||
+                  user.user_metadata?.name ||
+                  undefined,
+                accountEmail: user.email || undefined,
+              });
+              console.log(`[auth/callback] Bound ${provider} provider_token to user ${user.id}`);
+            } catch (persistErr) {
+              console.warn('[auth/callback] Could not persist provider_token into user_connections:', persistErr);
+            }
+          }
+        }
+
         // Return an HTML response that notifies opener if opened in a popup,
         // or redirects to the destination page.
         return new Response(
@@ -43,7 +74,9 @@ export async function GET(request: Request) {
           }
         );
       }
-      console.error('[auth/callback] Code exchange error:', error.message);
+      if (error) {
+        console.error('[auth/callback] Code exchange error:', error.message);
+      }
     } catch (err) {
       console.error('[auth/callback] Unexpected error:', err);
     }

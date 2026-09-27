@@ -12,6 +12,8 @@ import {
 import { createClient, isSupabaseServerConfigured } from '@/lib/supabase/server';
 import { createAdminClient, isAdminConfigured } from '@/lib/supabase/admin';
 import { recordTokenUsage, checkPlanLimits, touchActiveSession } from '@/lib/usage-tracking';
+import { executeGitHubAction } from '@/lib/integrations';
+import { getValidGitHubToken } from '@/lib/user-connections';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -255,6 +257,83 @@ export async function POST(
               .join('\n\n');
 
             baseSysInstruction += `\n\n### Attached Repository Code Context (User-Selected Files):\nThe user has explicitly attached the following files from their connected GitHub repository into this conversation context. Ground your answers, code reviews, bug fixes, and architectural explanations directly on these real files:\n\n${filesContext}\n\nDirectives for Attached Files:\n- Carefully inspect and reference these exact file contents, variable names, functions, and architecture.\n- Ground all reasoning on the code provided above.\n`;
+          }
+        }
+
+        // Grok-style GitHub repository URL detection & live ingest
+        const ghUrlMatch = prompt.match(/https?:\/\/github\.com\/([a-zA-Z0-9_.-]+)\/([a-zA-Z0-9_.-]+)/i);
+        if (ghUrlMatch) {
+          const ghOwner = ghUrlMatch[1];
+          const ghRepo = ghUrlMatch[2].replace(/\.git$/, '').replace(/\/$/, '');
+          const isIgnoredPath = ['features', 'settings', 'pricing', 'login', 'signup', 'explore', 'orgs'].includes(
+            ghOwner.toLowerCase()
+          );
+
+          if (!isIgnoredPath && ghOwner && ghRepo) {
+            const userGhToken = authenticatedUserId ? await getValidGitHubToken(authenticatedUserId) : null;
+
+            if (userGhToken && authenticatedUserId) {
+              sendEvent({
+                type: 'thinking',
+                content: `Detected GitHub repository ${ghOwner}/${ghRepo}. Inspecting repository file tree and README using your connected GitHub token...`,
+              });
+
+              try {
+                const [treeResult, readmeResult] = await Promise.all([
+                  executeGitHubAction('get_repo_tree', { owner: ghOwner, repo: ghRepo }, authenticatedUserId),
+                  executeGitHubAction(
+                    'get_file_contents',
+                    { owner: ghOwner, repo: ghRepo, path: 'README.md' },
+                    authenticatedUserId
+                  ),
+                ]);
+
+                let ingestedContext = `\n\n### Ingested GitHub Repository Context (${ghOwner}/${ghRepo}):\n`;
+                let hasIngestedData = false;
+
+                if (readmeResult.success && readmeResult.data?.content) {
+                  hasIngestedData = true;
+                  ingestedContext += `#### README.md:\n\`\`\`markdown\n${readmeResult.data.content}\n\`\`\`\n\n`;
+                }
+
+                if (treeResult.success && treeResult.data?.tree && Array.isArray(treeResult.data.tree)) {
+                  hasIngestedData = true;
+                  const fileList = treeResult.data.tree
+                    .slice(0, 80)
+                    .map((node: any) => `${node.type === 'tree' ? '📁' : '📄'} ${node.path}`)
+                    .join('\n');
+                  ingestedContext += `#### Repository File Structure (Top ${Math.min(
+                    80,
+                    treeResult.data.tree.length
+                  )} entries):\n\`\`\`\n${fileList}\n\`\`\`\n`;
+                }
+
+                if (hasIngestedData) {
+                  baseSysInstruction += ingestedContext;
+                  sendEvent({
+                    type: 'thinking',
+                    content: `Successfully ingested context from ${ghOwner}/${ghRepo}. README and repository file tree incorporated into reasoning context.`,
+                  });
+                } else {
+                  const errorMsg = treeResult.error || readmeResult.error || 'Repository contents unavailable.';
+                  sendEvent({
+                    type: 'thinking',
+                    content: `Attempted to inspect repository ${ghOwner}/${ghRepo}, but received error: ${errorMsg}`,
+                  });
+                }
+              } catch (repoIngestErr: any) {
+                console.warn('[chat/route] Repo ingest error:', repoIngestErr);
+                sendEvent({
+                  type: 'thinking',
+                  content: `Failed to inspect repository ${ghOwner}/${ghRepo}: ${repoIngestErr?.message || repoIngestErr}`,
+                });
+              }
+            } else {
+              sendEvent({
+                type: 'thinking',
+                content: `GitHub repository URL detected (${ghOwner}/${ghRepo}). Connect your GitHub account in Connectors with repo scope to allow AlphanexAI to inspect files and project architecture.`,
+              });
+            }
           }
         }
 

@@ -13,15 +13,12 @@ import {
   Mail,
   ExternalLink,
   ShieldCheck,
-  Settings,
-  Sliders,
   ChevronRight,
   ChevronDown,
-  Sparkles,
   ToggleLeft,
   ToggleRight,
   Database,
-  Terminal,
+  Key,
 } from 'lucide-react';
 
 export interface MCPConnectorItem {
@@ -36,6 +33,8 @@ export interface MCPConnectorItem {
   tools: { name: string; description: string }[];
   endpoint?: string;
   tokenConfigured: boolean;
+  username?: string | null;
+  accountEmail?: string | null;
 }
 
 const INITIAL_CONNECTORS: MCPConnectorItem[] = [
@@ -46,10 +45,10 @@ const INITIAL_CONNECTORS: MCPConnectorItem[] = [
     category: 'code',
     description:
       'Search repository codebases, inspect issues, review pull requests, and navigate branches directly from Developer Mode.',
-    status: 'connected',
+    status: 'disconnected',
     enabled: true,
     toolsCount: 4,
-    tokenConfigured: true,
+    tokenConfigured: false,
     endpoint: 'https://api.githubcopilot.com/mcp/',
     tools: [
       {
@@ -77,10 +76,10 @@ const INITIAL_CONNECTORS: MCPConnectorItem[] = [
     category: 'docs',
     description:
       'Read project briefs, system architectural specifications, and export finalized research reports or code patch briefs to Docs.',
-    status: 'connected',
+    status: 'disconnected',
     enabled: true,
     toolsCount: 3,
-    tokenConfigured: true,
+    tokenConfigured: false,
     endpoint: 'https://docs.googleapis.com/mcp/v1',
     tools: [
       {
@@ -104,10 +103,10 @@ const INITIAL_CONNECTORS: MCPConnectorItem[] = [
     category: 'email',
     description:
       'Search and read technical correspondence, incident alert threads, and customer bug reports with secure zero-retention tokens.',
-    status: 'connected',
+    status: 'disconnected',
     enabled: true,
     toolsCount: 3,
-    tokenConfigured: true,
+    tokenConfigured: false,
     endpoint: 'https://gmailmcp.googleapis.com/mcp/v1',
     tools: [
       {
@@ -164,41 +163,102 @@ export default function MCPConnectorsModal({
   onClose,
   onOpenRepoBrowser,
 }: MCPConnectorsModalProps) {
-  const [connectors, setConnectors] = useState<MCPConnectorItem[]>(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const saved = localStorage.getItem('alphanex_mcp_connectors');
-        if (saved) return JSON.parse(saved);
-      } catch (e) {
-        console.warn('Failed to parse saved connectors', e);
-      }
-    }
-    return INITIAL_CONNECTORS;
-  });
-
+  const [connectors, setConnectors] = useState<MCPConnectorItem[]>(INITIAL_CONNECTORS);
   const [expandedConnectorId, setExpandedConnectorId] = useState<string | null>('github');
   const [isTesting, setIsTesting] = useState(false);
-  const [testResult, setTestResult] = useState<string | null>(null);
+  const [testResult, setTestResult] = useState<{
+    success: boolean;
+    data: any;
+    rawJson?: string;
+  } | null>(null);
   const [isAddingCustom, setIsAddingCustom] = useState(false);
   const [customName, setCustomName] = useState('');
   const [customUrl, setCustomUrl] = useState('');
   const [customDescription, setCustomDescription] = useState('');
   const [tokenInputModalId, setTokenInputModalId] = useState<string | null>(null);
   const [tokenInputVal, setTokenInputVal] = useState('');
+  const [tokenInputError, setTokenInputError] = useState<string | null>(null);
+  const [isSavingToken, setIsSavingToken] = useState(false);
 
-  // Save changes to local storage
-  const saveConnectors = (updated: MCPConnectorItem[]) => {
-    setConnectors(updated);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('alphanex_mcp_connectors', JSON.stringify(updated));
-    }
-  };
+  // Listen for OAuth messages and refresh status on modal open
+  useEffect(() => {
+    if (!isOpen) return;
+
+    let active = true;
+
+    const fetchStatus = async () => {
+      try {
+        const authRes = await fetch('/api/auth/status');
+        if (authRes.ok && active) {
+          const authData = await authRes.json();
+          const gh = authData?.connections?.github;
+          const ggl = authData?.connections?.google;
+
+          setConnectors((prev) =>
+            prev.map((conn) => {
+              if (conn.id === 'github') {
+                const connected = Boolean(gh?.connected);
+                return {
+                  ...conn,
+                  status: connected ? 'connected' : 'disconnected',
+                  tokenConfigured: connected,
+                  username: gh?.username || null,
+                };
+              }
+              if (conn.id === 'google-docs' || conn.id === 'gmail') {
+                const connected = Boolean(ggl?.connected);
+                return {
+                  ...conn,
+                  status: connected ? 'connected' : 'disconnected',
+                  tokenConfigured: connected,
+                  accountEmail: ggl?.email || null,
+                };
+              }
+              return conn;
+            })
+          );
+        }
+      } catch (err) {
+        console.warn('[mcp-modal] Failed to fetch auth status:', err);
+      }
+    };
+
+    void fetchStatus();
+
+    const handleMessage = (event: MessageEvent) => {
+      if (
+        event.data?.type === 'OAUTH_AUTH_SUCCESS' ||
+        event.data?.type === 'SUPABASE_AUTH_SUCCESS'
+      ) {
+        console.log('[mcp-modal] OAuth message received, refreshing connectors status');
+        void fetchStatus();
+      }
+    };
+
+    window.addEventListener('message', handleMessage);
+    return () => {
+      active = false;
+      window.removeEventListener('message', handleMessage);
+    };
+  }, [isOpen]);
 
   const toggleConnector = (id: string) => {
-    const updated = connectors.map((c) =>
-      c.id === id ? { ...c, enabled: !c.enabled } : c
+    setConnectors((prev) =>
+      prev.map((c) => (c.id === id ? { ...c, enabled: !c.enabled } : c))
     );
-    saveConnectors(updated);
+  };
+
+  const openOAuthPopup = (provider: 'github' | 'google') => {
+    const width = 600;
+    const height = 700;
+    const left = window.screenX + (window.outerWidth - width) / 2;
+    const top = window.screenY + (window.outerHeight - height) / 2;
+    const url = `/api/auth/${provider}/start`;
+    window.open(
+      url,
+      'alphanex_oauth_popup',
+      `width=${width},height=${height},left=${left},top=${top},toolbar=no,menubar=no`
+    );
   };
 
   const handleTestAllConnectors = async () => {
@@ -207,13 +267,18 @@ export default function MCPConnectorsModal({
     try {
       const res = await fetch('/api/mcp/status');
       const data = await res.json();
-      setTestResult(
-        `✅ All ${connectors.filter((c) => c.enabled).length} active connectors verified. ${
-          data.total_tools_discovered || 10
-        } tools discovered via Model Context Protocol.`
-      );
-    } catch (e) {
-      setTestResult('✅ MCP Transport initialized. Fallback tool stubs ready for agent runs.');
+      setTestResult({
+        success: data.success,
+        data,
+        rawJson: JSON.stringify(data, null, 2),
+      });
+      refreshLiveStatus();
+    } catch (e: any) {
+      setTestResult({
+        success: false,
+        data: { error: e?.message || 'Failed to ping MCP status' },
+        rawJson: JSON.stringify({ error: e?.message || 'Network error' }, null, 2),
+      });
     } finally {
       setIsTesting(false);
     }
@@ -246,26 +311,66 @@ export default function MCPConnectorsModal({
       ],
     };
 
-    saveConnectors([...connectors, newConnector]);
+    setConnectors((prev) => [...prev, newConnector]);
     setCustomName('');
     setCustomUrl('');
     setCustomDescription('');
     setIsAddingCustom(false);
   };
 
-  const handleSaveToken = (id: string) => {
-    const updated = connectors.map((c) =>
-      c.id === id
-        ? {
-            ...c,
-            tokenConfigured: true,
-            status: 'connected' as const,
-          }
-        : c
-    );
-    saveConnectors(updated);
-    setTokenInputModalId(null);
-    setTokenInputVal('');
+  const handleSaveToken = async (id: string) => {
+    if (!tokenInputVal.trim()) return;
+    setIsSavingToken(true);
+    setTokenInputError(null);
+
+    try {
+      if (id === 'github') {
+        const res = await fetch('/api/auth/github/connect-token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: tokenInputVal.trim() }),
+        });
+        const data = await res.json();
+        if (data.success) {
+          setConnectors((prev) =>
+            prev.map((c) =>
+              c.id === 'github'
+                ? {
+                    ...c,
+                    tokenConfigured: true,
+                    status: 'connected',
+                    username: data.username,
+                  }
+                : c
+            )
+          );
+          setTokenInputModalId(null);
+          setTokenInputVal('');
+          refreshLiveStatus();
+        } else {
+          setTokenInputError(data.error || 'Failed to verify and save token.');
+        }
+      } else {
+        // Fallback for custom servers
+        setConnectors((prev) =>
+          prev.map((c) =>
+            c.id === id
+              ? {
+                  ...c,
+                  tokenConfigured: true,
+                  status: 'connected',
+                }
+              : c
+          )
+        );
+        setTokenInputModalId(null);
+        setTokenInputVal('');
+      }
+    } catch (err: any) {
+      setTokenInputError(err?.message || 'Error communicating with server.');
+    } finally {
+      setIsSavingToken(false);
+    }
   };
 
   if (!isOpen) return null;
@@ -281,7 +386,7 @@ export default function MCPConnectorsModal({
         className="bg-[#FBF9F5] border border-[#E5E2DC] rounded-2xl max-w-2xl w-full max-h-[90vh] flex flex-col shadow-2xl overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Modal Header - Claude.ai Customize Connectors style */}
+        {/* Modal Header */}
         <div className="px-6 py-4 bg-[#F3EFEA] border-b border-[#E5E2DC] flex items-center justify-between">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-lg bg-[#1F1E1D] text-white flex items-center justify-center shadow-2xs">
@@ -295,7 +400,7 @@ export default function MCPConnectorsModal({
                 </span>
               </h3>
               <p className="text-xs text-[#736E67]">
-                Connect your external tools & private context to Developer and Researcher agents
+                Connect external data sources & tools with per-user authentication
               </p>
             </div>
           </div>
@@ -313,12 +418,12 @@ export default function MCPConnectorsModal({
 
         {/* Scrollable Content */}
         <div className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-6">
-          {/* Status banner & Quick Ping */}
+          {/* Status banner & Ping */}
           <div className="p-3.5 bg-[#FAF7F2] border border-[#E5E2DC] rounded-xl flex items-center justify-between gap-3">
             <div className="flex items-center gap-2 text-xs text-[#4D4943]">
               <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
               <span>
-                <strong>Zero-Retention MCP Transport:</strong> Tool calls execute through secure allowlisted egress.
+                <strong>Per-User Data Connectors:</strong> Authenticated securely via OAuth or user PAT with zero mock data.
               </span>
             </div>
             <button
@@ -329,14 +434,33 @@ export default function MCPConnectorsModal({
               className="px-3 py-1.5 rounded-lg bg-[#1F1E1D] hover:bg-[#3D3A37] text-[#FBF9F5] text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shrink-0 shadow-2xs disabled:opacity-50"
             >
               <RefreshCw className={`w-3 h-3 ${isTesting ? 'animate-spin' : ''}`} />
-              <span>{isTesting ? 'Pinging...' : 'Test Connections'}</span>
+              <span>{isTesting ? 'Testing...' : 'Test Connections'}</span>
             </button>
           </div>
 
+          {/* Test Result Inspection */}
           {testResult && (
-            <div className="p-3 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-              <span>{testResult}</span>
+            <div className="p-3 rounded-xl bg-white border border-[#D5D0C7] text-xs space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-[#1F1E1D] flex items-center gap-1.5">
+                  {testResult.success ? (
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                  ) : (
+                    <AlertCircle className="w-3.5 h-3.5 text-amber-600" />
+                  )}
+                  Real Connector Status (MCP Server Response):
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setTestResult(null)}
+                  className="text-[10px] text-[#736E67] hover:underline"
+                >
+                  Dismiss
+                </button>
+              </div>
+              <pre className="p-2.5 rounded-lg bg-[#1F1E1D] text-emerald-400 font-mono text-[11px] overflow-x-auto max-h-48 leading-relaxed">
+                {testResult.rawJson}
+              </pre>
             </div>
           )}
 
@@ -346,21 +470,23 @@ export default function MCPConnectorsModal({
               <h4 className="text-xs font-semibold text-[#858079] uppercase tracking-wider">
                 Primary MCP Connectors (GitHub, Google Docs, Gmail)
               </h4>
-              <span className="text-[11px] text-emerald-700 font-medium">
-                {connectors.filter((c) => c.enabled).length} of {connectors.length} Active
+              <span className="text-[11px] text-[#736E67] font-medium">
+                {connectors.filter((c) => c.status === 'connected').length} of {connectors.length} Connected
               </span>
             </div>
 
             <div className="space-y-3">
               {connectors.map((connector) => {
                 const isExpanded = expandedConnectorId === connector.id;
+                const isConnected = connector.status === 'connected';
+
                 return (
                   <div
                     key={connector.id}
                     className={`rounded-xl border transition-all ${
-                      connector.enabled
+                      isConnected
                         ? 'bg-white border-[#D5D0C7] shadow-xs'
-                        : 'bg-[#F9F7F4] border-[#E5E2DC] opacity-75'
+                        : 'bg-[#F9F7F4] border-[#E5E2DC]'
                     }`}
                   >
                     <div className="p-4 flex items-start justify-between gap-3">
@@ -380,14 +506,67 @@ export default function MCPConnectorsModal({
                             <span className="text-[10px] px-2 py-0.5 rounded bg-[#F0ECE4] text-[#736E67] font-medium">
                               {connector.provider}
                             </span>
-                            <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-medium flex items-center gap-1">
-                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                              Ready ({connector.toolsCount} tools)
-                            </span>
+                            {isConnected ? (
+                              <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-medium flex items-center gap-1">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                                Connected {connector.username ? `@${connector.username}` : connector.accountEmail ? `(${connector.accountEmail})` : ''}
+                              </span>
+                            ) : (
+                              <span className="text-[10px] px-2 py-0.5 rounded bg-zinc-200 text-zinc-700 font-medium flex items-center gap-1">
+                                <span className="w-1.5 h-1.5 rounded-full bg-zinc-400" />
+                                Not connected
+                              </span>
+                            )}
                           </div>
                           <p className="text-xs text-[#55504A] mt-1 leading-relaxed">
                             {connector.description}
                           </p>
+
+                          {/* Quick Action buttons */}
+                          <div className="flex items-center gap-2 mt-2.5 flex-wrap">
+                            {!isConnected && (
+                              <>
+                                {(connector.id === 'github' || connector.id === 'google-docs' || connector.id === 'gmail') && (
+                                  <button
+                                    type="button"
+                                    onClick={() => openOAuthPopup(connector.id === 'github' ? 'github' : 'google')}
+                                    className="px-2.5 py-1 rounded-md bg-[#1F1E1D] hover:bg-black text-[#FBF9F5] text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer shadow-2xs"
+                                  >
+                                    <Link2 className="w-3 h-3 text-emerald-400" />
+                                    <span>Connect OAuth</span>
+                                  </button>
+                                )}
+                                {connector.id === 'github' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setTokenInputModalId('github');
+                                      setTokenInputVal('');
+                                      setTokenInputError(null);
+                                    }}
+                                    className="px-2.5 py-1 rounded-md border border-[#D5D0C7] bg-white hover:bg-[#F3EFEA] text-xs font-medium text-[#1F1E1D] flex items-center gap-1 transition-colors cursor-pointer"
+                                  >
+                                    <Key className="w-3 h-3 text-[#736E67]" />
+                                    <span>Paste PAT Token</span>
+                                  </button>
+                                )}
+                              </>
+                            )}
+
+                            {isConnected && connector.id === 'github' && onOpenRepoBrowser && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  onClose();
+                                  onOpenRepoBrowser();
+                                }}
+                                className="px-2.5 py-1 rounded-md bg-[#1F1E1D] hover:bg-black text-[#FBF9F5] text-xs font-medium flex items-center gap-1 transition-colors cursor-pointer shadow-2xs"
+                              >
+                                <Github className="w-3.5 h-3.5 text-amber-400" />
+                                <span>Browse Repositories</span>
+                              </button>
+                            )}
+                          </div>
                         </div>
                       </div>
 
@@ -429,24 +608,12 @@ export default function MCPConnectorsModal({
                         <div className="text-[11px] font-semibold text-[#858079] uppercase tracking-wider flex items-center justify-between flex-wrap gap-2">
                           <span>Discovered MCP Tools:</span>
                           <div className="flex items-center gap-3">
-                            {connector.id === 'github' && onOpenRepoBrowser && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  onClose();
-                                  onOpenRepoBrowser();
-                                }}
-                                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-[#1F1E1D] hover:bg-black text-[#FBF9F5] text-xs font-medium transition-colors cursor-pointer shadow-2xs"
-                              >
-                                <Github className="w-3.5 h-3.5 text-amber-400" />
-                                <span>Browse & Attach Repo Files</span>
-                              </button>
-                            )}
                             <button
                               type="button"
                               onClick={() => {
                                 setTokenInputModalId(connector.id);
                                 setTokenInputVal('');
+                                setTokenInputError(null);
                               }}
                               className="text-[11px] text-blue-600 hover:underline font-medium cursor-pointer"
                             >
@@ -634,29 +801,41 @@ export default function MCPConnectorsModal({
                 Configure Auth Token for {connectors.find((c) => c.id === tokenInputModalId)?.name}
               </h4>
               <p className="text-xs text-[#736E67]">
-                Provide your Personal Access Token or OAuth Bearer string. Stored strictly in local browser state with zero-retention logging.
+                Provide your Personal Access Token (classic or fine-grained with <code className="bg-gray-100 px-1 py-0.5 rounded">repo</code> scope). Token will be verified with the GitHub API and stored in your encrypted user connections.
               </p>
               <input
                 type="password"
                 value={tokenInputVal}
                 onChange={(e) => setTokenInputVal(e.target.value)}
-                placeholder="ghp_... or Bearer ya29...."
+                placeholder="ghp_... or github_pat_..."
                 className="w-full px-3 py-2 rounded-lg border border-[#D5D0C7] text-xs font-mono outline-hidden focus:border-blue-600"
               />
+              {tokenInputError && (
+                <p className="text-xs text-red-600 flex items-center gap-1">
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                  <span>{tokenInputError}</span>
+                </p>
+              )}
               <div className="flex justify-end gap-2 pt-2">
                 <button
                   type="button"
-                  onClick={() => setTokenInputModalId(null)}
+                  onClick={() => {
+                    setTokenInputModalId(null);
+                    setTokenInputVal('');
+                    setTokenInputError(null);
+                  }}
                   className="px-3 py-1 rounded text-xs text-[#736E67] hover:bg-[#F3EFEA]"
                 >
                   Cancel
                 </button>
                 <button
                   type="button"
+                  disabled={isSavingToken || !tokenInputVal.trim()}
                   onClick={() => handleSaveToken(tokenInputModalId)}
-                  className="px-3 py-1 rounded bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-semibold"
+                  className="px-3 py-1.5 rounded bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white text-xs font-semibold flex items-center gap-1 cursor-pointer"
                 >
-                  Save & Connect
+                  {isSavingToken && <RefreshCw className="w-3 h-3 animate-spin" />}
+                  <span>{isSavingToken ? 'Verifying & Saving...' : 'Save & Connect'}</span>
                 </button>
               </div>
             </div>
