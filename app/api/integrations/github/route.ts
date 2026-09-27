@@ -4,7 +4,7 @@ import { createClient, isSupabaseServerConfigured } from '@/lib/supabase/server'
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-export const maxDuration = 500;
+export const maxDuration = 300;
 
 async function resolveAuthenticatedUserId(
   req: NextRequest,

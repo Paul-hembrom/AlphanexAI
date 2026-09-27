@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { deployToVercel, attachDomainToVercel, DeployFile } from '@/lib/vercel-deploy';
 
-export const maxDuration = 500;
+export const maxDuration = 300;
 
 export async function POST(req: NextRequest) {
   try {
