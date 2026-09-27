@@ -7,6 +7,7 @@ export {
   DEFAULT_WEBAPP_NAME,
   WEBAPP_STORAGE_PREFIX,
   ACTIVE_APP_NAME_KEY,
+  WEBAPP_VERIFICATION_PREFIX,
   DEFAULT_STARTER_WEBAPP_HTML,
   slugifyAppName,
   extractCodeFromMarkdown,
@@ -14,8 +15,12 @@ export {
   saveWebAppPages,
   getWebAppPages,
   extractMultiPageFilesFromMarkdown,
+  normalizeProjectFiles,
+  bundleProjectForPreview,
+  saveWebAppVerification,
+  getWebAppVerification,
 } from './webapp-shared';
-export type { WebAppPage } from './webapp-shared';
+export type { WebAppPage, ProjectFile, WebAppVerificationData } from './webapp-shared';
 
 import {
   DEFAULT_WEBAPP_NAME,

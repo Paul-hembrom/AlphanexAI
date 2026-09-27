@@ -735,11 +735,15 @@ export default function ChatArea({
                                   : 'bg-emerald-500 animate-pulse'
                               }`}
                             />
-                            <span className="font-bold">
+                            <button
+                              type="button"
+                              onClick={() => onOpenWebPreview?.(message.webappBuild?.appName)}
+                              className="font-bold hover:underline cursor-pointer text-left"
+                            >
                               {message.webappBuild.buildStatus === 'failed'
-                                ? `Build Failed: ${message.webappBuild.appName}`
+                                ? `Build Notice: ${message.webappBuild.appName}`
                                 : `Compiled: ${message.webappBuild.appName}`}
-                            </span>
+                            </button>
 
                             {message.webappBuild.stack && (
                               <span className="px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-900 font-semibold text-[10px] uppercase">
@@ -779,13 +783,17 @@ export default function ChatArea({
                                 </button>
                               )}
 
-                            {onOpenWebPreview && message.webappBuild.buildStatus !== 'failed' && (
+                            {onOpenWebPreview && (
                               <button
                                 type="button"
                                 onClick={() => onOpenWebPreview(message.webappBuild?.appName)}
-                                className="px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs transition-colors shadow-2xs flex items-center gap-1.5 shrink-0"
+                                className={`px-3 py-1.5 rounded-lg text-white font-bold text-xs transition-colors shadow-2xs flex items-center gap-1.5 shrink-0 cursor-pointer ${
+                                  message.webappBuild.buildStatus === 'failed'
+                                    ? 'bg-neutral-800 hover:bg-neutral-900'
+                                    : 'bg-emerald-700 hover:bg-emerald-800'
+                                }`}
                               >
-                                <span>Open Web Preview</span>
+                                <span>Open Project & Preview</span>
                                 <ExternalLink className="w-3.5 h-3.5" />
                               </button>
                             )}

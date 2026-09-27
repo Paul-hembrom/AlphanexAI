@@ -378,11 +378,18 @@ export async function POST(
             await new Promise((r) => setTimeout(r, 15));
           }
 
+          const buildPages =
+            buildResult.pages && buildResult.pages.length > 0
+              ? buildResult.pages
+              : buildResult.html
+              ? [{ path: 'index.html', html: buildResult.html }]
+              : [];
+
           sendEvent({
             type: 'webapp_build',
             appName: buildResult.appName,
             html: buildResult.html,
-            pages: buildResult.pages,
+            pages: buildPages,
             stack: buildResult.stack,
             buildStatus: buildResult.buildStatus,
             testsPassed: buildResult.testsPassed,
@@ -452,11 +459,18 @@ export async function POST(
             await new Promise((r) => setTimeout(r, 15));
           }
 
+          const devBuildPages =
+            buildResult.pages && buildResult.pages.length > 0
+              ? buildResult.pages
+              : buildResult.html
+              ? [{ path: 'index.html', html: buildResult.html }]
+              : [];
+
           sendEvent({
             type: 'webapp_build',
             appName: buildResult.appName,
             html: buildResult.html,
-            pages: buildResult.pages,
+            pages: devBuildPages,
             stack: buildResult.stack,
             buildStatus: buildResult.buildStatus,
             testsPassed: buildResult.testsPassed,

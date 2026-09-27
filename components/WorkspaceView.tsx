@@ -32,9 +32,14 @@ import {
 import { resolvePlanTier, getPlanDisplayName, canUseModel } from '@/lib/plan-allowance';
 import {
   saveWebAppData,
+  getWebAppData,
   saveWebAppPages,
+  getWebAppPages,
+  normalizeProjectFiles,
+  saveWebAppVerification,
   slugifyAppName,
   ACTIVE_APP_NAME_KEY,
+  DEFAULT_WEBAPP_NAME,
   getPreviewUrl,
   validateHtmlSyntax,
   TerminalLogEntry,
@@ -48,7 +53,6 @@ import {
   AVAILABLE_MODELS,
   INITIAL_WORKSPACE_PARAMS,
   DEFAULT_SYSTEM_INSTRUCTIONS,
-  INITIAL_DIFF_SAMPLE,
 } from '@/lib/constants';
 import {
   FALLBACK_GUEST_PROFILE,
@@ -981,16 +985,37 @@ export default function WorkspaceView() {
                 );
 
                 // Save code into local web app sandbox
-                if (typeof window !== 'undefined' && buildData.html) {
+                if (typeof window !== 'undefined' && (buildData.html || (buildData.pages && buildData.pages.length > 0))) {
                   const appSlug = slugifyAppName(buildData.appName);
-                  saveWebAppData(appSlug, buildData.html);
-                  if (buildData.pages && buildData.pages.length > 0) {
-                    saveWebAppPages(appSlug, buildData.pages);
-                  }
+                  const normalizedFiles = normalizeProjectFiles(
+                    buildData.pages,
+                    buildData.html,
+                    userAttachments
+                  );
+                  const indexFile =
+                    normalizedFiles.find((f) => f.path === 'index.html') ||
+                    normalizedFiles.find((f) => f.path.endsWith('.html')) ||
+                    normalizedFiles[0];
+                  const indexHtml = indexFile ? indexFile.content : buildData.html;
+
+                  saveWebAppData(appSlug, indexHtml);
+                  saveWebAppPages(
+                    appSlug,
+                    normalizedFiles.map((f) => ({ path: f.path, html: f.content }))
+                  );
                   localStorage.setItem(ACTIVE_APP_NAME_KEY, appSlug);
+                  saveWebAppVerification(appSlug, {
+                    verificationLog: buildData.verificationLog,
+                    passed: buildData.buildStatus === 'success',
+                    checksRun: buildData.testsTotal,
+                    checksPassed: buildData.testsPassed,
+                    timestamp: Date.now(),
+                  });
+                  setActiveWebAppName(appSlug);
+
                   broadcastTerminalLog({
                     level: 'build',
-                    message: `Autonomous webapp build completed for "${buildData.appName}" (#${buildData.buildStatus}, ${buildData.testsPassed}/${buildData.testsTotal} tests passed)`,
+                    message: `Autonomous webapp build completed for "${buildData.appName}" (#${buildData.buildStatus}, ${buildData.testsPassed || 0}/${buildData.testsTotal || 0} tests passed)`,
                     source: 'studio-builder',
                   });
                   if (buildData.verificationLog && buildData.verificationLog.length > 0) {
@@ -1006,21 +1031,21 @@ export default function WorkspaceView() {
                     new CustomEvent('alphanex-webapp-updated', {
                       detail: {
                         appName: appSlug,
-                        html: buildData.html,
-                        pages: buildData.pages,
+                        html: indexHtml,
+                        pages: normalizedFiles.map((f) => ({ path: f.path, html: f.content })),
                         isHmr: true,
                       },
                     })
                   );
                 }
 
-                // Automatically open Canvas & switch to 'preview' sandbox tab
+                // Automatically open Canvas & switch to 'code' sandbox tab
                 setIsCanvasOpen(true);
                 setActiveMobileTab('canvas');
                 if (typeof window !== 'undefined') {
                   window.dispatchEvent(
                     new CustomEvent('alphanex-switch-canvas-tab', {
-                      detail: { tab: 'preview' },
+                      detail: { tab: 'code' },
                     })
                   );
                 }
@@ -1152,25 +1177,36 @@ export default function WorkspaceView() {
   };
 
   // Open Web App in Web Preview Sandbox tab in Canvas
-  const handleOpenWebPreview = useCallback((appName?: string) => {
-    if (appName && typeof window !== 'undefined') {
-      localStorage.setItem(ACTIVE_APP_NAME_KEY, slugifyAppName(appName));
-      window.dispatchEvent(
-        new CustomEvent('alphanex-webapp-updated', {
-          detail: { appName },
-        })
-      );
-    }
-    setIsCanvasOpen(true);
-    setActiveMobileTab('canvas');
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(
-        new CustomEvent('alphanex-switch-canvas-tab', {
-          detail: { tab: 'preview' },
-        })
-      );
-    }
-  }, []);
+  const handleOpenWebPreview = useCallback(
+    (appName?: string) => {
+      const slug = slugifyAppName(appName || activeWebAppName || DEFAULT_WEBAPP_NAME);
+      setActiveWebAppName(slug);
+      if (typeof window !== 'undefined') {
+        localStorage.setItem(ACTIVE_APP_NAME_KEY, slug);
+        const existingPages = getWebAppPages(slug);
+        const existingData = getWebAppData(slug);
+        window.dispatchEvent(
+          new CustomEvent('alphanex-webapp-updated', {
+            detail: {
+              appName: slug,
+              html: existingData.html,
+              pages: existingPages,
+            },
+          })
+        );
+      }
+      setIsCanvasOpen(true);
+      setActiveMobileTab('canvas');
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent('alphanex-switch-canvas-tab', {
+            detail: { tab: 'code' },
+          })
+        );
+      }
+    },
+    [activeWebAppName]
+  );
 
   // Divider Mouse/Pointer Drag Resize Handler
   const handleStartDrag = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -1551,6 +1587,18 @@ export default function WorkspaceView() {
             customCodeSnippet={customCodeSnippet}
             currentBuildStack={selectedBuildStack}
             currentMode={currentMode}
+            attachments={
+              messages.flatMap((m) => m.attachments || []).filter(
+                (att, idx, arr) => arr.findIndex((a) => (a.path || a.name) === (att.path || att.name)) === idx
+              )
+            }
+            activeWebAppName={activeWebAppName}
+            latestVerificationLog={
+              [...messages]
+                .reverse()
+                .find((m) => m.webappBuild?.verificationLog && m.webappBuild.verificationLog.length > 0)
+                ?.webappBuild?.verificationLog || []
+            }
             citations={
               [...messages]
                 .reverse()

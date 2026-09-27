@@ -1003,10 +1003,10 @@ export async function buildApplicationFromPrompt(
   const primaryFilename = primaryFile?.path || (stack === 'react' ? 'App.tsx' : stack === 'nextjs' ? 'page.tsx' : stack === 'vue' ? 'App.vue' : 'index.html');
   const primaryCode = primaryFile ? primaryFile.content : DEFAULT_STARTER_WEBAPP_HTML;
 
-  const multiPages: WebAppPage[] | undefined =
-    isMultiPage || stack === 'html-css-js'
+  const multiPages: WebAppPage[] =
+    verifiedFiles.length > 0
       ? verifiedFiles.map((f) => ({ path: f.path, html: f.content }))
-      : undefined;
+      : [{ path: primaryFilename, html: primaryCode }];
 
   const buildStatus: 'success' | 'failed' = allFilesPassed ? 'success' : 'failed';
 

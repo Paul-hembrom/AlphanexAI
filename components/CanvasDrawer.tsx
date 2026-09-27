@@ -45,10 +45,11 @@ import {
   Split,
   Rows,
   WrapText,
+  Folder,
+  File,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
-import { DiffData, WorkMode, Citation, BuildStack } from '@/lib/types';
-import { INITIAL_DIFF_SAMPLE, SAMPLE_PYTHON_SCRIPT } from '@/lib/constants';
+import { DiffData, WorkMode, Citation, BuildStack, ChatAttachment, ProjectFile } from '@/lib/types';
 import {
   detectFileType,
   tokenizeDiffLine,
@@ -67,11 +68,19 @@ import {
   DEFAULT_STARTER_WEBAPP_HTML,
   DEFAULT_WEBAPP_NAME,
   ACTIVE_APP_NAME_KEY,
+  saveWebAppPages,
+  getWebAppPages,
+  normalizeProjectFiles,
+  bundleProjectForPreview,
+  saveWebAppVerification,
+  getWebAppVerification,
+  WebAppPage,
 } from '@/lib/webapp-preview';
 
 export type CanvasTab =
-  | 'diff'
+  | 'code'
   | 'preview'
+  | 'diff'
   | 'terminal'
   | 'github'
   | 'connectors'
@@ -95,6 +104,9 @@ interface CanvasDrawerProps {
   onToggleFullWidth?: () => void;
   isDragging?: boolean;
   currentBuildStack?: BuildStack;
+  attachments?: ChatAttachment[];
+  activeWebAppName?: string;
+  latestVerificationLog?: string[];
 }
 
 export default function CanvasDrawer({
@@ -112,20 +124,23 @@ export default function CanvasDrawer({
   onToggleFullWidth,
   isDragging = false,
   currentBuildStack = 'html-css-js',
+  attachments = [],
+  activeWebAppName: propActiveWebAppName,
+  latestVerificationLog = [],
 }: CanvasDrawerProps) {
   const [activeTab, setActiveTab] = useState<CanvasTab>(() => {
-    if (currentMode === 'developer') return 'preview';
+    if (currentMode === 'developer' || currentMode === 'build') return 'code';
     if (currentMode === 'researcher') return 'sources';
     return 'document';
   });
 
   // Switch active tab automatically when mode changes
   useEffect(() => {
-    if (currentMode === 'developer') {
+    if (currentMode === 'developer' || currentMode === 'build') {
       setActiveTab((prev) =>
-        prev === 'preview' || prev === 'diff' || prev === 'terminal' || prev === 'github' || prev === 'connectors'
+        prev === 'code' || prev === 'preview' || prev === 'diff' || prev === 'terminal' || prev === 'github' || prev === 'connectors'
           ? prev
-          : 'preview'
+          : 'code'
       );
     } else if (currentMode === 'researcher') {
       setActiveTab((prev) => (prev === 'sources' || prev === 'brief' ? prev : 'sources'));
@@ -146,7 +161,7 @@ export default function CanvasDrawer({
   }, []);
 
   // Tab 1: Diff Viewer State with Automatic File Type Detection
-  const currentDiff = propDiffData || INITIAL_DIFF_SAMPLE;
+  const currentDiff = propDiffData;
   const [acceptedFix, setAcceptedFix] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
   const [diffViewMode, setDiffViewMode] = useState<'side-by-side' | 'unified'>('side-by-side');
@@ -157,22 +172,36 @@ export default function CanvasDrawer({
   // Automatic file type detection based on file extension and content
   const detectedFileType = useMemo(
     () =>
-      detectFileType(
-        currentDiff.filename,
-        currentDiff.fixedCode || currentDiff.originalCode
-      ),
-    [currentDiff.filename, currentDiff.fixedCode, currentDiff.originalCode]
+      currentDiff
+        ? detectFileType(
+            currentDiff.filename,
+            currentDiff.fixedCode || currentDiff.originalCode
+          )
+        : detectFileType('sample.txt', ''),
+    [currentDiff]
   );
 
   const activeTabSize = overrideTabSize ?? detectedFileType.indentation.tabSize;
 
-  // Tab 2: Python WASM Terminal State
+  // Tab 2: Terminal & Sandbox Verification State
   const [pythonCode, setPythonCode] = useState<string>(
-    customCodeSnippet || SAMPLE_PYTHON_SCRIPT
+    customCodeSnippet || ''
   );
-  const [terminalOutput, setTerminalOutput] = useState<string>(
-    'Alphanex AI Studio In-Browser Python 3.12 (Pyodide WASM)\nReady. Press "Run Code" to execute.\n'
-  );
+  const [terminalOutput, setTerminalOutput] = useState<string>(() => {
+    if (latestVerificationLog && latestVerificationLog.length > 0) {
+      return latestVerificationLog.join('\n');
+    }
+    const initialName =
+      propActiveWebAppName ||
+      (typeof window !== 'undefined'
+        ? localStorage.getItem(ACTIVE_APP_NAME_KEY) || DEFAULT_WEBAPP_NAME
+        : DEFAULT_WEBAPP_NAME);
+    const existingVerif = getWebAppVerification(initialName);
+    if (existingVerif?.verificationLog && existingVerif.verificationLog.length > 0) {
+      return existingVerif.verificationLog.join('\n');
+    }
+    return 'No sandbox run for this project yet.\n';
+  });
   const [isRunningCode, setIsRunningCode] = useState(false);
   const [pyodideReady, setPyodideReady] = useState(false);
   const [executionTime, setExecutionTime] = useState<number | null>(null);
@@ -306,6 +335,7 @@ export default function CanvasDrawer({
   }, [currentBuildStack]);
 
   const [webAppName, setWebAppName] = useState<string>(() => {
+    if (propActiveWebAppName) return propActiveWebAppName;
     if (typeof window !== 'undefined') {
       return localStorage.getItem(ACTIVE_APP_NAME_KEY) || DEFAULT_WEBAPP_NAME;
     }
@@ -315,11 +345,78 @@ export default function CanvasDrawer({
   const [appNameDraft, setAppNameDraft] = useState(webAppName);
   const [webAppHtml, setWebAppHtml] = useState<string>(() => {
     const initialName =
-      typeof window !== 'undefined'
+      propActiveWebAppName ||
+      (typeof window !== 'undefined'
         ? localStorage.getItem(ACTIVE_APP_NAME_KEY) || DEFAULT_WEBAPP_NAME
-        : DEFAULT_WEBAPP_NAME;
+        : DEFAULT_WEBAPP_NAME);
     return getWebAppData(initialName).html;
   });
+
+  // AI Studio Project Files State
+  const [projectFiles, setProjectFiles] = useState<ProjectFile[]>(() => {
+    const initialName =
+      propActiveWebAppName ||
+      (typeof window !== 'undefined'
+        ? localStorage.getItem(ACTIVE_APP_NAME_KEY) || DEFAULT_WEBAPP_NAME
+        : DEFAULT_WEBAPP_NAME);
+    const pages = getWebAppPages(initialName);
+    const appData = getWebAppData(initialName);
+    return normalizeProjectFiles(pages, appData.html, attachments);
+  });
+
+  const [activePath, setActivePath] = useState<string>('index.html');
+  const [studioLayout, setStudioLayout] = useState<'split' | 'files' | 'code' | 'preview'>('split');
+  const [isEditingSource, setIsEditingSource] = useState(false);
+  const [editableSourceContent, setEditableSourceContent] = useState('');
+  const [copiedSource, setCopiedSource] = useState(false);
+  const [sandboxCheckRunning, setSandboxCheckRunning] = useState(false);
+  const [sandboxCheckResult, setSandboxCheckResult] = useState<any>(() => {
+    const initialName =
+      propActiveWebAppName ||
+      (typeof window !== 'undefined'
+        ? localStorage.getItem(ACTIVE_APP_NAME_KEY) || DEFAULT_WEBAPP_NAME
+        : DEFAULT_WEBAPP_NAME);
+    return getWebAppVerification(initialName);
+  });
+  const [customEvalCode, setCustomEvalCode] = useState('');
+  const [isExecutingEval, setIsExecutingEval] = useState(false);
+
+  // Keep activePath pointing to an existing file
+  useEffect(() => {
+    if (projectFiles.length > 0 && !projectFiles.some((f) => f.path === activePath)) {
+      const defaultFile =
+        projectFiles.find((f) => f.path === 'index.html') ||
+        projectFiles.find((f) => f.path.endsWith('.html')) ||
+        projectFiles[0];
+      if (defaultFile) {
+        setActivePath(defaultFile.path);
+      }
+    }
+  }, [projectFiles, activePath]);
+
+  // Sync prop changes
+  useEffect(() => {
+    if (propActiveWebAppName) {
+      setWebAppName(propActiveWebAppName);
+      setAppNameDraft(propActiveWebAppName);
+      const pages = getWebAppPages(propActiveWebAppName);
+      const appData = getWebAppData(propActiveWebAppName);
+      setProjectFiles(normalizeProjectFiles(pages, appData.html, attachments));
+      const verif = getWebAppVerification(propActiveWebAppName);
+      if (verif) setSandboxCheckResult(verif);
+    }
+  }, [propActiveWebAppName, attachments]);
+
+  useEffect(() => {
+    if (latestVerificationLog && latestVerificationLog.length > 0) {
+      setTerminalOutput(latestVerificationLog.join('\n'));
+      setSandboxCheckResult((prev: any) => ({
+        ...(prev || {}),
+        verificationLog: latestVerificationLog,
+      }));
+    }
+  }, [latestVerificationLog]);
+
   const [previewViewport, setPreviewViewport] = useState<'desktop' | 'tablet' | 'mobile'>('desktop');
   const [previewIframeKey, setPreviewIframeKey] = useState(0);
   const previewIframeRef = useRef<HTMLIFrameElement>(null);
@@ -334,12 +431,143 @@ export default function CanvasDrawer({
   const [showWebSourceEditor, setShowWebSourceEditor] = useState(false);
   const [editableWebHtml, setEditableWebHtml] = useState<string>(() => {
     const initialName =
-      typeof window !== 'undefined'
+      propActiveWebAppName ||
+      (typeof window !== 'undefined'
         ? localStorage.getItem(ACTIVE_APP_NAME_KEY) || DEFAULT_WEBAPP_NAME
-        : DEFAULT_WEBAPP_NAME;
+        : DEFAULT_WEBAPP_NAME);
     return getWebAppData(initialName).html;
   });
   const [isEditingWebCode, setIsEditingWebCode] = useState(false);
+
+  const selectedFile = useMemo(() => {
+    return projectFiles.find((f) => f.path === activePath) || projectFiles[0] || null;
+  }, [projectFiles, activePath]);
+
+  const selectedFileType = useMemo(() => {
+    return detectFileType(selectedFile?.path || '', selectedFile?.content || '');
+  }, [selectedFile]);
+
+  const previewBundle = useMemo(() => {
+    return bundleProjectForPreview(projectFiles, activePath);
+  }, [projectFiles, activePath]);
+
+  const activePreviewHtml = useMemo(() => {
+    if (previewBundle.isHtml && previewBundle.html) {
+      return previewBundle.html;
+    }
+    if (webAppHtml && webAppHtml.trim()) {
+      return webAppHtml;
+    }
+    return DEFAULT_STARTER_WEBAPP_HTML;
+  }, [previewBundle, webAppHtml]);
+
+  const handleStartEditSource = () => {
+    if (selectedFile) {
+      setEditableSourceContent(selectedFile.content);
+      setIsEditingSource(true);
+    }
+  };
+
+  const handleSaveSourceEdit = () => {
+    if (!selectedFile) return;
+    const updated = projectFiles.map((f) =>
+      f.path === selectedFile.path ? { ...f, content: editableSourceContent } : f
+    );
+    setProjectFiles(updated);
+    setIsEditingSource(false);
+
+    saveWebAppPages(
+      webAppName,
+      updated.map((f) => ({ path: f.path, html: f.content }))
+    );
+
+    const rebundled = bundleProjectForPreview(updated, activePath);
+    if (rebundled.isHtml && rebundled.html) {
+      if (selectedFile.path.endsWith('.html') || selectedFile.path === 'index.html') {
+        saveWebAppData(webAppName, editableSourceContent);
+      }
+      applyHotModuleReplacement(rebundled.html, webAppName);
+    } else {
+      applyHotModuleReplacement(webAppHtml, webAppName, true);
+    }
+  };
+
+  const handleCopySource = () => {
+    if (!selectedFile) return;
+    navigator.clipboard.writeText(selectedFile.content);
+    setCopiedSource(true);
+    setTimeout(() => setCopiedSource(false), 2000);
+  };
+
+  const handleRunSandboxCheck = async () => {
+    setSandboxCheckRunning(true);
+    setTerminalOutput((prev) => prev + `\n[Sandbox] Running verification check on ${projectFiles.length} file(s)...\n`);
+    try {
+      const res = await fetch('/api/sandbox/check', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          appName: webAppName,
+          files: projectFiles,
+          stack: activeAppStack,
+        }),
+      });
+      const data = await res.json();
+      setSandboxCheckResult(data);
+      if (data.verificationLog && data.verificationLog.length > 0) {
+        const fullOutput = [
+          ...data.verificationLog,
+          data.stdout ? `\n--- STDOUT ---\n${data.stdout}` : '',
+          data.stderr ? `\n--- STDERR ---\n${data.stderr}` : '',
+        ]
+          .filter(Boolean)
+          .join('\n');
+        setTerminalOutput(fullOutput);
+      }
+      saveWebAppVerification(webAppName, {
+        verificationLog: data.verificationLog,
+        stdout: data.stdout,
+        stderr: data.stderr,
+        passed: data.passed,
+        checksRun: data.checksRun,
+        checksPassed: data.checksPassed,
+        timestamp: Date.now(),
+      });
+    } catch (err: any) {
+      const errMsg = `[Sandbox Check Error] ${err?.message || 'Verification failed'}`;
+      setTerminalOutput((prev) => prev + `\n${errMsg}\n`);
+    } finally {
+      setSandboxCheckRunning(false);
+    }
+  };
+
+  const handleRunCustomEval = async () => {
+    if (!customEvalCode.trim()) return;
+    setIsExecutingEval(true);
+    setTerminalOutput((prev) => prev + `\n> ${customEvalCode}\n`);
+    try {
+      const res = await fetch('/api/sandbox/execute', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: customEvalCode }),
+      });
+      const data = await res.json();
+      if (data.stdout) {
+        setTerminalOutput((prev) => prev + data.stdout + '\n');
+      }
+      if (data.stderr) {
+        setTerminalOutput((prev) => prev + '[stderr] ' + data.stderr + '\n');
+      }
+      if (!data.stdout && !data.stderr && data.error) {
+        setTerminalOutput((prev) => prev + '[error] ' + data.error + '\n');
+      }
+    } catch (err: any) {
+      setTerminalOutput((prev) => prev + '[Execution Error] ' + (err?.message || String(err)) + '\n');
+    } finally {
+      setIsExecutingEval(false);
+      setCustomEvalCode('');
+    }
+  };
 
   // Apply HMR without destroying the iframe element
   const applyHotModuleReplacement = useCallback(
@@ -407,13 +635,18 @@ export default function CanvasDrawer({
 
     const handleStorage = (e: StorageEvent) => {
       if (e.key && e.key.startsWith('alphanex_webapp_code_') && e.newValue) {
-        const incomingSlug = e.key.replace('alphanex_webapp_code_', '');
+        const incomingSlug = e.key.replace('alphanex_webapp_code_', '').replace('_pages', '');
         if (incomingSlug === currentSlug || !webAppName || webAppName === DEFAULT_WEBAPP_NAME) {
           if (incomingSlug !== currentSlug) {
             setWebAppName(incomingSlug);
             setAppNameDraft(incomingSlug);
           }
-          applyHotModuleReplacement(e.newValue, incomingSlug);
+          const pages = getWebAppPages(incomingSlug);
+          const appData = getWebAppData(incomingSlug);
+          setProjectFiles(normalizeProjectFiles(pages, appData.html, attachments));
+          if (!e.key.includes('_pages')) {
+            applyHotModuleReplacement(e.newValue, incomingSlug);
+          }
         }
       }
     };
@@ -425,11 +658,18 @@ export default function CanvasDrawer({
       if (ce.detail?.stack) {
         setActiveAppStack(ce.detail.stack);
       }
+      if (incomingSlug && incomingSlug !== currentSlug) {
+        setWebAppName(incomingSlug);
+        setAppNameDraft(incomingSlug);
+      }
+      if (ce.detail?.pages) {
+        setProjectFiles(normalizeProjectFiles(ce.detail.pages, incomingHtml, attachments));
+      } else {
+        const pages = getWebAppPages(incomingSlug || webAppName);
+        const appData = getWebAppData(incomingSlug || webAppName);
+        setProjectFiles(normalizeProjectFiles(pages, appData.html || incomingHtml, attachments));
+      }
       if (incomingHtml) {
-        if (incomingSlug && incomingSlug !== currentSlug) {
-          setWebAppName(incomingSlug);
-          setAppNameDraft(incomingSlug);
-        }
         applyHotModuleReplacement(incomingHtml, incomingSlug || webAppName);
       }
     };
@@ -458,7 +698,7 @@ export default function CanvasDrawer({
       window.removeEventListener('alphanex-webapp-updated', handleCustom);
       if (bc) bc.close();
     };
-  }, [webAppName, applyHotModuleReplacement]);
+  }, [webAppName, applyHotModuleReplacement, attachments]);
 
   // Auto-detect code whenever assistant outputs or regenerates code in developer or any mode
   useEffect(() => {
@@ -631,8 +871,8 @@ captured
           featureBranch,
           prTitle,
           prBody,
-          patchCode: currentDiff.fixedCode,
-          filename: currentDiff.filename || 'src/index.ts',
+          patchCode: currentDiff?.fixedCode || activePreviewHtml || '',
+          filename: currentDiff?.filename || selectedFile?.path || 'src/index.ts',
         }),
       });
       const data = await res.json();
@@ -686,9 +926,17 @@ captured
       let args: Record<string, any> = {};
       if (tool === 'github_search_code') args = { query: 'TODO' };
       else if (tool === 'github_create_pull_request')
-        args = { repoUrl, targetBranch, featureBranch, prTitle, prBody, patchCode: currentDiff.fixedCode };
+        args = {
+          repoUrl,
+          targetBranch,
+          featureBranch,
+          prTitle,
+          prBody,
+          patchCode: currentDiff?.fixedCode || activePreviewHtml || '',
+        };
       else if (tool === 'github_list_repos') args = {};
-      else if (tool === 'github_get_file_contents') args = { path: currentDiff.filename || 'README.md' };
+      else if (tool === 'github_get_file_contents')
+        args = { path: currentDiff?.filename || selectedFile?.path || 'README.md' };
       else if (tool === 'gmail_list_threads') args = { query: 'is:unread' };
       else if (tool === 'gmail_read_thread') args = { threadId: '' };
       else if (tool === 'gmail_draft_response')
@@ -702,7 +950,7 @@ captured
       else if (tool === 'gdocs_create_brief')
         args = {
           title: 'Alphanex AI Studio — Technical Brief',
-          content: currentDiff.explanation || 'Verified code implementation patch.',
+          content: currentDiff?.explanation || 'Verified code implementation patch.',
         };
 
       const res = await fetch('/api/mcp/execute', {
@@ -731,12 +979,12 @@ captured
 
   // Helper to split diff into side by side lines
   const originalLines = useMemo(
-    () => (currentDiff.originalCode || '').split('\n'),
-    [currentDiff.originalCode]
+    () => (currentDiff?.originalCode || '').split('\n'),
+    [currentDiff?.originalCode]
   );
   const fixedLines = useMemo(
-    () => (currentDiff.fixedCode || '').split('\n'),
-    [currentDiff.fixedCode]
+    () => (currentDiff?.fixedCode || '').split('\n'),
+    [currentDiff?.fixedCode]
   );
   const maxLines = Math.max(originalLines.length, fixedLines.length);
 
@@ -882,8 +1130,8 @@ captured
       {/* Canvas Top Bar */}
       <div className="px-4 py-2.5 bg-[#F3EFEA] border-b border-[#E5E2DC] flex items-center justify-between">
         <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
-          {/* Tabs for Developer Mode ONLY: "Diff Viewer", "Python Terminal", and "GitHub PR" */}
-          {currentMode === 'developer' && (
+          {/* Tabs for Developer and Build Modes: "Code & Preview", "Terminal", "Diff Viewer", and "GitHub PR" */}
+          {(currentMode === 'developer' || currentMode === 'build') && (
             <div
               id="canvas-tabs-developer"
               className="flex items-center bg-[#ECE8E1] p-0.5 rounded-lg border border-[#D5D0C7]"
@@ -891,20 +1139,41 @@ captured
               aria-label="Developer Tools"
             >
               <button
-                id="canvas-tab-preview"
+                id="canvas-tab-code"
                 type="button"
                 role="tab"
-                aria-selected={activeTab === 'preview'}
-                onClick={() => setActiveTab('preview')}
+                aria-selected={activeTab === 'code' || activeTab === 'preview'}
+                onClick={() => setActiveTab('code')}
                 className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs transition-all cursor-pointer ${
-                  activeTab === 'preview'
+                  activeTab === 'code' || activeTab === 'preview'
                     ? 'bg-[#FBF9F5] text-[#1F1E1D] font-bold shadow-xs'
                     : 'text-[#736E67] hover:text-[#1F1E1D]'
                 }`}
               >
-                <Globe className="w-3.5 h-3.5 text-indigo-600" />
-                <span>Web Preview</span>
+                <Code2 className="w-3.5 h-3.5 text-indigo-600" />
+                <span>Code & Preview</span>
+                {projectFiles.length > 0 && (
+                  <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-indigo-100 text-indigo-800 font-mono font-bold">
+                    {projectFiles.length}
+                  </span>
+                )}
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              </button>
+
+              <button
+                id="canvas-tab-terminal"
+                type="button"
+                role="tab"
+                aria-selected={activeTab === 'terminal'}
+                onClick={() => setActiveTab('terminal')}
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs transition-all cursor-pointer ${
+                  activeTab === 'terminal'
+                    ? 'bg-[#FBF9F5] text-[#1F1E1D] font-semibold shadow-xs'
+                    : 'text-[#736E67] hover:text-[#1F1E1D]'
+                }`}
+              >
+                <Terminal className="w-3.5 h-3.5 text-amber-600" />
+                <span>Terminal</span>
               </button>
 
               <button
@@ -919,24 +1188,8 @@ captured
                     : 'text-[#736E67] hover:text-[#1F1E1D]'
                 }`}
               >
-                <Code2 className="w-3.5 h-3.5 text-blue-600" />
+                <Split className="w-3.5 h-3.5 text-blue-600" />
                 <span>Diff Viewer</span>
-              </button>
-
-              <button
-                id="canvas-tab-terminal"
-                type="button"
-                role="tab"
-                aria-selected={activeTab === 'terminal'}
-                onClick={() => setActiveTab('terminal')}
-                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs transition-all ${
-                  activeTab === 'terminal'
-                    ? 'bg-[#FBF9F5] text-[#1F1E1D] font-semibold shadow-xs'
-                    : 'text-[#736E67] hover:text-[#1F1E1D]'
-                }`}
-              >
-                <Terminal className="w-3.5 h-3.5 text-amber-600" />
-                <span>Python Terminal</span>
               </button>
 
               <button
@@ -1165,15 +1418,15 @@ captured
         </div>
       </div>
 
-      {/* Developer Mode Tab: Interactive Web App Preview with New Tab Link & Domain Config */}
-      {currentMode === 'developer' && activeTab === 'preview' && (
+      {/* Developer and Build Mode: AI Studio Panel (Files Tree + Source Inspector + Live Preview) */}
+      {(currentMode === 'developer' || currentMode === 'build') && (activeTab === 'code' || activeTab === 'preview') && (
         <div id="webapp-preview-canvas-content" className="flex-1 flex flex-col overflow-hidden bg-[#FAF8F5]">
           {/* Top Browser-Style Address Bar & Controls */}
           <div className="px-3.5 py-2.5 bg-[#FAF8F3] border-b border-[#E5E2DC] flex flex-wrap items-center justify-between gap-2 text-xs">
             {/* Left: App Name Editor & URL Slug */}
             <div className="flex items-center gap-2 flex-1 min-w-[200px]">
               <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" title="Web App Runtime Live" />
-              
+
               {isEditingAppName ? (
                 <div className="flex items-center gap-1.5">
                   <input
@@ -1237,10 +1490,71 @@ captured
               )}
             </div>
 
-            {/* Right: Viewport Controls, Code Inspector, Domain Config & New Tab Action */}
-            <div className="flex items-center gap-1.5 shrink-0">
+            {/* Center: Layout Mode & Viewport Switchers */}
+            <div className="flex items-center gap-2">
+              {/* Studio layout mode: Split, Files, Code, Preview */}
+              <div className="flex items-center bg-[#EAE6DF] p-0.5 rounded-lg border border-[#D5D0C7] text-xs">
+                <button
+                  type="button"
+                  onClick={() => setStudioLayout('split')}
+                  className={`px-2 py-1 rounded-md text-[11px] font-semibold transition-all flex items-center gap-1 cursor-pointer ${
+                    studioLayout === 'split'
+                      ? 'bg-white text-[#1F1E1D] shadow-2xs'
+                      : 'text-[#736E67] hover:text-[#1F1E1D]'
+                  }`}
+                  title="3-Column Studio Layout (Files | Source | Preview)"
+                >
+                  <Columns className="w-3 h-3" />
+                  <span className="hidden sm:inline">Split</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStudioLayout('files')}
+                  className={`px-2 py-1 rounded-md text-[11px] font-semibold transition-all flex items-center gap-1 cursor-pointer ${
+                    studioLayout === 'files'
+                      ? 'bg-white text-[#1F1E1D] shadow-2xs'
+                      : 'text-[#736E67] hover:text-[#1F1E1D]'
+                  }`}
+                  title="View File Tree Full Width"
+                >
+                  <Folder className="w-3 h-3" />
+                  <span>Files</span>
+                  {projectFiles.length > 0 && (
+                    <span className="text-[9px] px-1 rounded-full bg-[#E0DCD5] font-mono">
+                      {projectFiles.length}
+                    </span>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStudioLayout('code')}
+                  className={`px-2 py-1 rounded-md text-[11px] font-semibold transition-all flex items-center gap-1 cursor-pointer ${
+                    studioLayout === 'code'
+                      ? 'bg-white text-[#1F1E1D] shadow-2xs'
+                      : 'text-[#736E67] hover:text-[#1F1E1D]'
+                  }`}
+                  title="View Source Code Full Width"
+                >
+                  <Code2 className="w-3 h-3" />
+                  <span>Code</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStudioLayout('preview')}
+                  className={`px-2 py-1 rounded-md text-[11px] font-semibold transition-all flex items-center gap-1 cursor-pointer ${
+                    studioLayout === 'preview'
+                      ? 'bg-white text-[#1F1E1D] shadow-2xs'
+                      : 'text-[#736E67] hover:text-[#1F1E1D]'
+                  }`}
+                  title="View Live Preview Full Width"
+                >
+                  <Monitor className="w-3 h-3" />
+                  <span>Preview</span>
+                </button>
+              </div>
+
               {/* Viewport switcher */}
-              <div className="hidden sm:flex items-center bg-[#EAE6DF] p-0.5 rounded-lg border border-[#D5D0C7]">
+              <div className="hidden xl:flex items-center bg-[#EAE6DF] p-0.5 rounded-lg border border-[#D5D0C7]">
                 <button
                   type="button"
                   onClick={() => setPreviewViewport('desktop')}
@@ -1272,13 +1586,28 @@ captured
                   <Smartphone className="w-3.5 h-3.5" />
                 </button>
               </div>
+            </div>
+
+            {/* Right: HMR, Reload, Domain, and Link Actions */}
+            <div className="flex items-center gap-1.5 shrink-0">
+              {/* Re-run Sandbox Check button */}
+              <button
+                type="button"
+                disabled={sandboxCheckRunning || projectFiles.length === 0}
+                onClick={handleRunSandboxCheck}
+                className="flex items-center gap-1 px-2 py-1 rounded-md text-xs font-semibold bg-white border border-[#D5D0C7] hover:bg-[#FAF8F5] text-[#1F1E1D] transition-colors cursor-pointer disabled:opacity-50"
+                title="Verify files in Vercel sandbox"
+              >
+                <ShieldCheck className={`w-3.5 h-3.5 text-amber-600 ${sandboxCheckRunning ? 'animate-spin' : ''}`} />
+                <span className="hidden md:inline">{sandboxCheckRunning ? 'Checking...' : 'Check'}</span>
+              </button>
 
               {/* HMR Auto-Refresh Toggle & Status Indicator */}
               <button
                 type="button"
                 id="webapp-canvas-hmr-toggle-btn"
                 onClick={() => setAutoRefreshEnabled(!autoRefreshEnabled)}
-                className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-semibold border transition-all cursor-pointer ${
+                className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs font-semibold border transition-all cursor-pointer ${
                   !autoRefreshEnabled
                     ? 'bg-[#F0ECE4] text-[#888] border-[#D5D0C7] hover:bg-[#E5E2DC]'
                     : hmrStatus === 'updating'
@@ -1289,7 +1618,7 @@ captured
                 }`}
                 title={
                   autoRefreshEnabled
-                    ? 'Auto-refresh & HMR are ON. AI generated updates hot-swap instantly into the sandbox without page reload. Click to pause.'
+                    ? 'Auto-refresh & HMR are ON. AI generated updates hot-swap instantly. Click to pause.'
                     : 'Auto-refresh is paused. Click to resume HMR.'
                 }
               >
@@ -1302,63 +1631,37 @@ captured
                       : 'text-emerald-600'
                   }`}
                 />
-                <span className="hidden sm:inline">
+                <span className="hidden lg:inline">
                   {!autoRefreshEnabled
-                    ? 'HMR Paused'
+                    ? 'Paused'
                     : hmrStatus === 'updating'
-                    ? 'Hot Swapping...'
+                    ? 'Swapping...'
                     : hmrStatus === 'hot-updated'
-                    ? 'Hot Updated'
-                    : 'HMR Active'}
+                    ? 'Updated'
+                    : 'HMR'}
                 </span>
-                {autoRefreshEnabled && (
-                  <span
-                    className={`w-1.5 h-1.5 rounded-full ${
-                      hmrStatus === 'updating'
-                        ? 'bg-amber-500 animate-ping'
-                        : hmrStatus === 'hot-updated'
-                        ? 'bg-emerald-500'
-                        : 'bg-emerald-500 animate-pulse'
-                    }`}
-                  />
-                )}
               </button>
 
               {/* Refresh / Hard Reload Sandbox */}
               <button
                 type="button"
                 id="webapp-canvas-reload-btn"
-                onClick={() => applyHotModuleReplacement(webAppHtml, webAppName, true)}
+                onClick={() => applyHotModuleReplacement(activePreviewHtml, webAppName, true)}
                 className="p-1.5 rounded-md hover:bg-[#EFECE6] text-[#736E67] hover:text-[#1F1E1D] transition-colors cursor-pointer"
                 title="Hard reload preview sandbox"
               >
                 <RotateCcw className="w-3.5 h-3.5" />
               </button>
 
-              {/* Toggle HTML Code Inspector */}
-              <button
-                type="button"
-                onClick={() => setShowWebSourceEditor(!showWebSourceEditor)}
-                className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium border transition-colors cursor-pointer ${
-                  showWebSourceEditor
-                    ? 'bg-[#1F1E1D] text-white border-[#1F1E1D]'
-                    : 'bg-white text-[#55504A] border-[#D5D0C7] hover:bg-[#FAF8F5]'
-                }`}
-                title="Inspect or Edit HTML Source"
-              >
-                <Code2 className="w-3.5 h-3.5" />
-                <span className="hidden xl:inline">Code</span>
-              </button>
-
               {/* Domain Config Option Trigger */}
               <button
                 type="button"
                 onClick={() => setShowWebDomainModal(true)}
-                className="flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium bg-white text-[#55504A] border border-[#D5D0C7] hover:bg-[#FAF8F5] transition-colors cursor-pointer"
-                title="Custom Domain Hosting & Android App Packaging"
+                className="hidden xl:flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium bg-white text-[#55504A] border border-[#D5D0C7] hover:bg-[#FAF8F5] transition-colors cursor-pointer"
+                title="Custom Domain Hosting & Mobile App Packaging"
               >
                 <Globe className="w-3.5 h-3.5 text-indigo-600" />
-                <span className="hidden xl:inline">Domain</span>
+                <span>Domain</span>
               </button>
 
               {/* Copy URL Link */}
@@ -1381,190 +1684,286 @@ captured
                 title={`Open built website in dedicated new tab: ${activePreviewUrl}`}
               >
                 <ExternalLink className="w-3.5 h-3.5 text-amber-400" />
-                <span>Open in New Tab</span>
+                <span className="hidden sm:inline">Open in Tab</span>
               </a>
             </div>
           </div>
 
-          {/* Quick Domain & Mobile Packaging Roadmap Notice */}
-          <div className="px-3.5 py-1.5 bg-gradient-to-r from-indigo-50/70 to-purple-50/50 border-b border-indigo-100 flex items-center justify-between text-[11px] text-indigo-950">
-            <div className="flex items-center gap-1.5 truncate">
-              <Sparkles className="w-3 h-3 text-indigo-600 shrink-0" />
-              <span className="truncate">
-                Live URL: <strong className="font-mono">{activePreviewUrl}</strong>
-              </span>
-            </div>
-            <button
-              type="button"
-              onClick={() => setShowWebDomainModal(true)}
-              className="text-indigo-700 hover:text-indigo-900 font-semibold underline shrink-0 cursor-pointer ml-2"
-            >
-              Domain & Hosting Config
-            </button>
-          </div>
-
-          {/* Canvas Display & Code Inspector Split View */}
-          <div className="flex-1 flex overflow-hidden relative">
-            {/* Interactive Sandbox Screen */}
-            <div className="flex-1 flex items-center justify-center p-3 overflow-auto bg-[#EFEBE4]/60">
-              {activeAppStack !== 'flutter' ? (
-                <div
-                  className={`transition-all duration-200 overflow-hidden bg-white ${
-                    previewViewport === 'mobile'
-                      ? 'w-[375px] h-[667px] rounded-2xl shadow-2xl border-4 border-[#1F1E1D]'
-                      : previewViewport === 'tablet'
-                      ? 'w-[768px] h-[780px] rounded-xl shadow-2xl border-2 border-[#D5D0C7]'
-                      : 'w-full h-full rounded-md shadow-xs border border-[#E0DCD5]'
-                  }`}
-                >
-                  <iframe
-                    ref={previewIframeRef}
-                    key={previewIframeKey}
-                    srcDoc={prepareHmrHtml(webAppHtml || DEFAULT_STARTER_WEBAPP_HTML)}
-                    title={`Live Preview of ${cleanAppSlug}`}
-                    className="w-full h-full border-0 bg-white"
-                    sandbox="allow-scripts allow-forms allow-modals allow-same-origin allow-popups"
-                  />
-                </div>
-              ) : (
-                <div className="w-full max-w-2xl bg-white rounded-xl border border-[#D5D0C7] shadow-sm p-5 space-y-4">
-                  <div className="flex items-center justify-between pb-3 border-b border-[#E5E2DC]">
-                    <div className="flex items-center gap-2.5">
-                      <div className="w-9 h-9 rounded-lg bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-700">
-                        <Code2 className="w-5 h-5" />
-                      </div>
-                      <div>
-                        <h3 className="text-sm font-bold text-[#1F1E1D] flex items-center gap-2">
-                          <span>{activeAppStack.toUpperCase()} Project Verified</span>
-                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 font-semibold">
-                            Syntax Validated
-                          </span>
-                        </h3>
-                        <p className="text-xs text-[#736E67]">
-                          Scaffold File:{' '}
-                          <code className="font-mono text-[#1F1E1D] font-semibold">
-                            {activeAppStack === 'flutter'
-                              ? 'lib/main.dart'
-                              : activeAppStack === 'vue'
-                              ? 'src/App.vue'
-                              : activeAppStack === 'nextjs'
-                              ? 'app/page.tsx'
-                              : 'src/App.tsx'}
-                          </code>
-                        </p>
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        navigator.clipboard.writeText(webAppHtml);
-                        setCopiedWebCode(true);
-                        setTimeout(() => setCopiedWebCode(false), 2000);
-                      }}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-[#FAF8F5] border border-[#D5D0C7] hover:bg-[#EFECE6] text-[#1F1E1D] transition-colors cursor-pointer"
-                    >
-                      {copiedWebCode ? (
-                        <>
-                          <Check className="w-3.5 h-3.5 text-emerald-600" />
-                          <span>Copied</span>
-                        </>
-                      ) : (
-                        <>
-                          <Copy className="w-3.5 h-3.5" />
-                          <span>Copy Source</span>
-                        </>
-                      )}
-                    </button>
+          {/* AI Studio 3-Column Panel (Files | Source | Live Preview) */}
+          <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
+            {/* COLUMN 1: Project File Tree */}
+            {(studioLayout === 'split' || studioLayout === 'files') && (
+              <div
+                id="studio-file-tree"
+                className={`${
+                  studioLayout === 'files' ? 'w-full flex-1' : 'w-full lg:w-44 xl:w-52 shrink-0'
+                } border-b lg:border-b-0 lg:border-r border-[#E5E2DC] bg-[#FAF8F5] flex flex-col overflow-hidden max-h-48 lg:max-h-none`}
+              >
+                <div className="px-3 py-2 bg-[#F3EFEA] border-b border-[#E5E2DC] flex items-center justify-between text-xs font-semibold text-[#1F1E1D]">
+                  <div className="flex items-center gap-1.5">
+                    <Folder className="w-3.5 h-3.5 text-amber-600" />
+                    <span>Project Files</span>
                   </div>
+                  <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-[#E5E2DC] text-[#736E67] font-mono font-bold">
+                    {projectFiles.length}
+                  </span>
+                </div>
 
-                  <div className="p-3 bg-amber-50/90 border border-amber-200 rounded-lg text-xs text-amber-900 flex items-start gap-2.5">
-                    <ShieldCheck className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
-                    <div>
-                      <p className="font-semibold">Framework Runtime Notice</p>
-                      <p className="text-[11px] text-amber-800 mt-0.5 leading-relaxed">
-                        This is a <strong>{activeAppStack}</strong> project. Preview of this stack requires a framework dev server (e.g. Vite, Next.js bundler, Metro, or Flutter SDK); showing verified source code view instead.
+                <div className="flex-1 overflow-y-auto p-1.5 space-y-0.5">
+                  {projectFiles.length === 0 ? (
+                    <div className="p-4 text-center text-xs text-[#736E67] space-y-1.5 my-auto">
+                      <Folder className="w-7 h-7 text-[#C5C0B7] mx-auto" />
+                      <p className="font-semibold text-[#1F1E1D]">No files generated</p>
+                      <p className="text-[11px] leading-relaxed">
+                        Build an app or attach a GitHub file to explore project files.
                       </p>
                     </div>
-                  </div>
+                  ) : (
+                    projectFiles.map((f) => {
+                      const isSelected = activePath === f.path;
+                      const fType = detectFileType(f.path, f.content);
+                      const isHtml = f.path.endsWith('.html') || f.path.endsWith('.htm');
+                      const isCss = f.path.endsWith('.css');
+                      const isJs = f.path.endsWith('.js') || f.path.endsWith('.ts') || f.path.endsWith('.jsx') || f.path.endsWith('.tsx');
+                      const isPy = f.path.endsWith('.py');
 
-                  <div className="rounded-lg bg-[#1F1E1D] text-[#E0DCD5] p-4 max-h-96 overflow-auto font-mono text-xs leading-relaxed border border-[#33302C]">
-                    <pre className="whitespace-pre-wrap">{webAppHtml}</pre>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* In-Canvas Source Code Editor Drawer */}
-            {showWebSourceEditor && (
-              <div className="w-80 sm:w-96 h-full bg-[#1F1E1D] text-[#E0DCD5] border-l border-[#33302C] flex flex-col z-10 shrink-0 shadow-xl">
-                <div className="p-2.5 bg-[#151413] border-b border-[#2B2824] flex items-center justify-between text-xs">
-                  <span className="font-bold text-white flex items-center gap-1.5">
-                    <Code2 className="w-3.5 h-3.5 text-emerald-400" />
-                    index.html
-                  </span>
-                  <div className="flex items-center gap-1.5">
-                    {isEditingWebCode ? (
-                      <>
+                      return (
                         <button
-                          type="button"
-                          onClick={handleSaveCustomWebCode}
-                          className="px-2 py-0.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold"
-                        >
-                          Save
-                        </button>
-                        <button
+                          key={f.path}
                           type="button"
                           onClick={() => {
-                            setEditableWebHtml(webAppHtml);
-                            setIsEditingWebCode(false);
+                            setActivePath(f.path);
+                            setIsEditingSource(false);
+                            if (studioLayout === 'files') setStudioLayout('code');
                           }}
-                          className="px-1.5 py-0.5 text-[10px] text-[#888] hover:text-white"
+                          className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-mono transition-all text-left cursor-pointer group ${
+                            isSelected
+                              ? 'bg-[#1F1E1D] text-white shadow-xs font-semibold'
+                              : 'text-[#44403C] hover:bg-[#EFECE6] hover:text-[#1F1E1D]'
+                          }`}
+                          title={f.path}
                         >
-                          Cancel
+                          <div className="flex items-center gap-2 truncate">
+                            {isHtml ? (
+                              <FileCode className={`w-3.5 h-3.5 shrink-0 ${isSelected ? 'text-amber-400' : 'text-orange-600'}`} />
+                            ) : isCss ? (
+                              <FileText className={`w-3.5 h-3.5 shrink-0 ${isSelected ? 'text-blue-300' : 'text-blue-600'}`} />
+                            ) : isJs ? (
+                              <Code2 className={`w-3.5 h-3.5 shrink-0 ${isSelected ? 'text-indigo-300' : 'text-indigo-600'}`} />
+                            ) : isPy ? (
+                              <Terminal className={`w-3.5 h-3.5 shrink-0 ${isSelected ? 'text-amber-300' : 'text-amber-600'}`} />
+                            ) : (
+                              <File className={`w-3.5 h-3.5 shrink-0 ${isSelected ? 'text-neutral-300' : 'text-[#736E67]'}`} />
+                            )}
+                            <span className="truncate">{f.path}</span>
+                          </div>
+                          <span
+                            className={`text-[9px] px-1 py-0.2 rounded font-sans uppercase shrink-0 ${
+                              isSelected
+                                ? 'bg-neutral-800 text-neutral-300'
+                                : 'bg-[#EAE6DF] text-[#736E67] group-hover:bg-[#DDD7CD]'
+                            }`}
+                          >
+                            {fType.extension.replace('.', '') || fType.id}
+                          </span>
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* COLUMN 2: Source Code Pane */}
+            {(studioLayout === 'split' || studioLayout === 'code') && (
+              <div
+                id="studio-source-pane"
+                className={`${
+                  studioLayout === 'code' ? 'w-full flex-1' : 'flex-1 min-w-[280px]'
+                } border-b lg:border-b-0 lg:border-r border-[#E5E2DC] bg-[#1E1E1E] text-neutral-200 flex flex-col overflow-hidden`}
+              >
+                {/* Source Header */}
+                <div className="px-3 py-2 bg-[#151413] border-b border-[#2B2824] flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-2 truncate">
+                    <Code2 className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                    <span className="font-mono font-bold text-white truncate">
+                      {selectedFile ? selectedFile.path : 'index.html'}
+                    </span>
+                    {selectedFile && (
+                      <span className="text-[10px] px-1.5 py-0.2 rounded bg-neutral-800 text-neutral-300 border border-neutral-700 font-sans hidden sm:inline">
+                        {selectedFileType.name}
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {selectedFile && (
+                      <>
+                        {isEditingSource ? (
+                          <>
+                            <button
+                              type="button"
+                              onClick={handleSaveSourceEdit}
+                              className="px-2.5 py-1 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold cursor-pointer transition shadow-2xs"
+                            >
+                              Save
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditableSourceContent(selectedFile.content);
+                                setIsEditingSource(false);
+                              }}
+                              className="px-2 py-1 text-[11px] text-neutral-400 hover:text-white cursor-pointer"
+                            >
+                              Cancel
+                            </button>
+                          </>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={handleStartEditSource}
+                            className="flex items-center gap-1 px-2.5 py-1 rounded bg-[#2B2824] hover:bg-[#38342E] text-neutral-300 hover:text-white text-[11px] font-medium cursor-pointer transition"
+                            title="Edit file source directly"
+                          >
+                            <Edit3 className="w-3 h-3" />
+                            <span>Edit</span>
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={handleCopySource}
+                          className="p-1 rounded hover:bg-[#2B2824] text-neutral-400 hover:text-white transition-colors cursor-pointer"
+                          title="Copy file source"
+                        >
+                          {copiedSource ? (
+                            <Check className="w-3.5 h-3.5 text-emerald-400" />
+                          ) : (
+                            <Copy className="w-3.5 h-3.5" />
+                          )}
                         </button>
                       </>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => setIsEditingWebCode(true)}
-                        className="px-2 py-0.5 rounded bg-[#2B2824] hover:bg-[#38342E] text-white text-[10px] font-medium"
-                      >
-                        Edit
-                      </button>
                     )}
-                    <button
-                      type="button"
-                      onClick={() => setShowWebSourceEditor(false)}
-                      className="p-1 text-[#888] hover:text-white"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
                   </div>
                 </div>
 
-                <div className="flex-1 p-2.5 overflow-auto font-mono text-[11px] leading-relaxed">
-                  {isEditingWebCode ? (
+                {/* Source Code Content */}
+                <div className="flex-1 overflow-auto bg-[#1E1E1E]">
+                  {isEditingSource ? (
                     <textarea
-                      value={editableWebHtml}
-                      onChange={(e) => setEditableWebHtml(e.target.value)}
-                      className="w-full h-full bg-transparent text-emerald-400 font-mono text-[11px] outline-hidden resize-none"
+                      value={editableSourceContent}
+                      onChange={(e) => setEditableSourceContent(e.target.value)}
+                      className="w-full h-full p-3 bg-transparent text-emerald-400 font-mono text-xs leading-relaxed outline-hidden resize-none"
                       spellCheck={false}
                     />
+                  ) : selectedFile ? (
+                    <pre className="p-3 font-mono text-xs leading-relaxed text-neutral-300 overflow-x-auto select-text">
+                      <code>{selectedFile.content}</code>
+                    </pre>
                   ) : (
-                    <pre className="text-neutral-300 whitespace-pre-wrap">{webAppHtml || DEFAULT_STARTER_WEBAPP_HTML}</pre>
+                    <div className="h-full flex items-center justify-center p-6 text-center text-xs text-neutral-500">
+                      Select or generate a file to view source code.
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* COLUMN 3: Live Preview Pane */}
+            {(studioLayout === 'split' || studioLayout === 'preview') && (
+              <div
+                id="studio-preview-pane"
+                className={`${
+                  studioLayout === 'preview' ? 'w-full flex-1' : 'flex-1 min-w-[320px]'
+                } bg-[#EFEBE4]/60 flex flex-col overflow-hidden relative`}
+              >
+                {/* Preview Header */}
+                <div className="px-3 py-2 bg-[#FAF8F3] border-b border-[#E5E2DC] flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-2 truncate">
+                    <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+                    <span className="font-semibold text-[#1F1E1D] truncate">
+                      {previewBundle.isHtml
+                        ? `Preview (${previewBundle.previewPath || 'index.html'})`
+                        : `Preview`}
+                    </span>
+                    {selectedFile && previewBundle.previewPath && selectedFile.path !== previewBundle.previewPath && previewBundle.isHtml && (
+                      <span className="text-[10px] text-indigo-700 bg-indigo-50 border border-indigo-200 px-1.5 py-0.2 rounded font-sans hidden sm:inline truncate">
+                        live bundled with {selectedFile.path}
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => applyHotModuleReplacement(activePreviewHtml, cleanAppSlug, true)}
+                      className="p-1 rounded hover:bg-[#EFECE6] text-[#736E67] hover:text-[#1F1E1D] transition-colors cursor-pointer"
+                      title="Hard reload preview sandbox"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                    </button>
+                    <a
+                      href={activePreviewUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-1 px-2.5 py-1 rounded bg-[#1F1E1D] hover:bg-[#38342E] text-white text-[11px] font-bold transition shadow-2xs shrink-0 cursor-pointer"
+                      title={`Open live app in dedicated tab: ${activePreviewUrl}`}
+                    >
+                      <ExternalLink className="w-3 h-3 text-amber-400" />
+                      <span className="hidden sm:inline">Open in Tab</span>
+                    </a>
+                  </div>
+                </div>
+
+                {/* Preview Iframe Container */}
+                <div className="flex-1 flex items-center justify-center p-3 overflow-auto">
+                  {previewBundle.isHtml || projectFiles.length === 0 ? (
+                    <div
+                      className={`transition-all duration-200 overflow-hidden bg-white ${
+                        previewViewport === 'mobile'
+                          ? 'w-[375px] h-[667px] rounded-2xl shadow-2xl border-4 border-[#1F1E1D]'
+                          : previewViewport === 'tablet'
+                          ? 'w-[768px] h-[780px] rounded-xl shadow-2xl border-2 border-[#D5D0C7]'
+                          : 'w-full h-full rounded-md shadow-xs border border-[#E0DCD5]'
+                      }`}
+                    >
+                      <iframe
+                        ref={previewIframeRef}
+                        key={previewIframeKey}
+                        srcDoc={prepareHmrHtml(activePreviewHtml)}
+                        title={`Live Preview of ${cleanAppSlug}`}
+                        className="w-full h-full border-0 bg-white"
+                        sandbox="allow-scripts allow-forms allow-modals allow-same-origin allow-popups"
+                      />
+                    </div>
+                  ) : (
+                    <div className="w-full max-w-sm bg-white rounded-xl border border-[#D5D0C7] shadow-sm p-5 space-y-3 text-center my-auto">
+                      <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-700 flex items-center justify-center mx-auto">
+                        <Terminal className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-bold text-[#1F1E1D]">Non-HTML File: {selectedFile?.path}</h4>
+                        <p className="text-xs text-[#736E67] mt-1 leading-relaxed">
+                          This file ({selectedFileType.name}) runs in the backend sandbox, not in the browser HTML iframe.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setActiveTab('terminal')}
+                        className="px-3.5 py-1.5 rounded-lg bg-[#1F1E1D] hover:bg-[#3D3A37] text-white text-xs font-semibold inline-flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+                      >
+                        <Terminal className="w-3.5 h-3.5 text-amber-400" />
+                        <span>View Sandbox Output</span>
+                      </button>
+                    </div>
                   )}
                 </div>
 
-                <div className="p-2 bg-[#151413] border-t border-[#2B2824] flex items-center justify-between text-[10px] text-[#888]">
-                  <span>Syncs across tabs</span>
-                  <button
-                    type="button"
-                    onClick={handleResetWebStarter}
-                    className="text-amber-400 hover:underline cursor-pointer"
-                  >
-                    Reset Template
-                  </button>
-                </div>
+                {projectFiles.length === 0 && (
+                  <div className="px-3 py-1 bg-[#FAF8F5] border-t border-[#E5E2DC] text-[10px] text-[#736E67] text-center">
+                    Starter placeholder — generate an application to see your live preview
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -1670,10 +2069,20 @@ captured
         </div>
       )}
 
-      {/* Tab 1: Side-by-Side Monaco-Style Diff Viewer (Developer Mode Only) */}
-      {currentMode === 'developer' && activeTab === 'diff' && (
+      {/* Tab 1: Side-by-Side Monaco-Style Diff Viewer (Developer & Build Mode) */}
+      {(currentMode === 'developer' || currentMode === 'build') && activeTab === 'diff' && (
         <div id="diff-viewer-content" className="flex-1 flex flex-col overflow-hidden">
-          {/* File Meta & Detection Header */}
+          {!currentDiff ? (
+            <div className="h-full flex flex-col items-center justify-center p-6 text-center text-xs text-[#736E67] my-auto">
+              <Split className="w-8 h-8 opacity-40 mx-auto text-[#AAAAAA]" />
+              <p className="font-semibold text-[#1F1E1D] text-sm mt-2">No Active Diff</p>
+              <p className="text-xs text-[#736E67] mt-1 max-w-sm">
+                Generate or ask the assistant to propose code changes to inspect side-by-side diffs.
+              </p>
+            </div>
+          ) : (
+            <>
+              {/* File Meta & Detection Header */}
           <div className="px-4 py-2.5 bg-[#FAF8F3] border-b border-[#E5E2DC] flex flex-wrap items-center justify-between gap-2 text-xs">
             <div className="flex flex-wrap items-center gap-2">
               <FileCode className="w-4 h-4 text-blue-600 shrink-0" />
@@ -2028,20 +2437,28 @@ captured
               <span>Rule: {detectedFileType.indentation.indentGuide}</span>
             </div>
           </div>
+            </>
+          )}
         </div>
       )}
 
-      {/* Tab 2: Interactive In-Browser Python Terminal using Pyodide (Developer Mode Only) */}
-      {currentMode === 'developer' && activeTab === 'terminal' && (
-        <div id="terminal-content" className="flex-1 flex flex-col overflow-hidden">
+      {/* Tab 2: Terminal & Real Sandbox Verification Logs (Developer & Build Mode) */}
+      {(currentMode === 'developer' || currentMode === 'build') && activeTab === 'terminal' && (
+        <div id="terminal-content" className="flex-1 flex flex-col overflow-hidden bg-[#0F0F0F] text-[#E0E0E0]">
           {/* Terminal Toolbar */}
-          <div className="px-4 py-2 bg-[#FAF8F3] border-b border-[#E5E2DC] flex items-center justify-between text-xs">
+          <div className="px-4 py-2.5 bg-[#181818] border-b border-[#2B2B2B] flex flex-wrap items-center justify-between gap-2 text-xs">
             <div className="flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-              <span className="font-semibold text-[#1F1E1D]">Pyodide WASM Engine</span>
-              {executionTime !== null && (
-                <span className="text-[11px] text-[#736E67] flex items-center gap-1">
-                  <Clock className="w-3 h-3" /> {executionTime}ms
+              <span className="font-semibold text-white">Vercel Sandbox Verification</span>
+              {sandboxCheckResult && typeof sandboxCheckResult.checksRun === 'number' && (
+                <span
+                  className={`text-[10px] px-2 py-0.5 rounded-full font-mono font-bold ${
+                    sandboxCheckResult.passed
+                      ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
+                      : 'bg-red-950 text-red-300 border border-red-800'
+                  }`}
+                >
+                  {sandboxCheckResult.checksPassed || 0}/{sandboxCheckResult.checksRun} Checks Passed
                 </span>
               )}
             </div>
@@ -2049,57 +2466,112 @@ captured
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={() =>
-                  setTerminalOutput('Alphanex AI Studio In-Browser Terminal cleared.\n')
-                }
-                className="px-2 py-1 rounded bg-[#EFECE6] hover:bg-[#E5E2DC] text-[#736E67] hover:text-[#1F1E1D] text-xs font-medium flex items-center gap-1"
+                onClick={() => setTerminalOutput('Terminal output cleared.\n')}
+                className="px-2 py-1 rounded bg-[#252525] hover:bg-[#303030] text-[#AAAAAA] hover:text-white text-xs font-medium flex items-center gap-1 transition-colors cursor-pointer"
               >
                 <RotateCcw className="w-3 h-3" />
                 <span>Clear</span>
               </button>
 
               <button
-                id="run-python-code-btn"
+                id="rerun-sandbox-check-btn"
                 type="button"
-                disabled={isRunningCode}
-                onClick={handleRunCode}
-                className="px-3 py-1 rounded bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white font-semibold flex items-center gap-1.5 shadow-xs transition-colors"
+                disabled={sandboxCheckRunning || projectFiles.length === 0}
+                onClick={handleRunSandboxCheck}
+                className="px-3 py-1 rounded bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white font-semibold flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
+                title="Execute runBuildCheckInSandbox on current project files"
               >
-                <Play className="w-3 h-3 fill-current" />
-                <span>{isRunningCode ? 'Running...' : 'Run Code'}</span>
+                <RefreshCw className={`w-3 h-3 ${sandboxCheckRunning ? 'animate-spin' : ''}`} />
+                <span>{sandboxCheckRunning ? 'Checking Sandbox...' : 'Re-run Checks'}</span>
               </button>
             </div>
           </div>
 
-          {/* Python Code Input Editor */}
-          <div className="flex-1 flex flex-col border-b border-[#E5E2DC]">
-            <div className="px-3 py-1 bg-[#252526] text-[#AAAAAA] text-[11px] font-mono flex items-center justify-between border-b border-[#333333]">
-              <span>main.py (Editable Python 3.12 Script)</span>
-              <span className="text-[10px] text-amber-400">Ctrl+Enter / Click Run</span>
-            </div>
-            <textarea
-              id="python-code-editor"
-              value={pythonCode}
-              onChange={(e) => setPythonCode(e.target.value)}
-              className="flex-1 p-3 bg-[#1E1E1E] text-[#D4D4D4] font-mono text-xs leading-relaxed resize-none outline-hidden"
-              spellCheck={false}
-            />
-          </div>
+          {/* Terminal Main Output Body */}
+          <div className="flex-1 p-4 font-mono text-xs overflow-y-auto space-y-3 leading-relaxed">
+            {!sandboxCheckResult && (!latestVerificationLog || latestVerificationLog.length === 0) && (!terminalOutput || terminalOutput.includes('cleared')) ? (
+              <div className="h-full flex flex-col items-center justify-center text-center space-y-2 text-[#777777] my-auto">
+                <Terminal className="w-8 h-8 opacity-40 text-[#AAAAAA] mx-auto" />
+                <p className="font-semibold text-neutral-300 text-sm">No sandbox run for this project yet.</p>
+                <p className="text-xs max-w-sm text-neutral-500">
+                  Click &ldquo;Re-run Checks&rdquo; to execute syntax validation and sandbox checks on the current project files.
+                </p>
+                {projectFiles.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleRunSandboxCheck}
+                    disabled={sandboxCheckRunning}
+                    className="mt-2 px-3 py-1.5 rounded-lg bg-[#252525] hover:bg-[#333333] text-neutral-200 border border-[#444444] text-xs font-semibold cursor-pointer transition-colors"
+                  >
+                    Run Sandbox Checks Now
+                  </button>
+                )}
+              </div>
+            ) : (
+              <>
+                {/* Real Verification Log lines */}
+                {((sandboxCheckResult?.verificationLog && sandboxCheckResult.verificationLog.length > 0) ||
+                  (latestVerificationLog && latestVerificationLog.length > 0)) && (
+                  <div className="space-y-1">
+                    <div className="text-[10px] uppercase text-[#888888] font-bold tracking-wider mb-1 select-none">
+                      Verification Checks:
+                    </div>
+                    {(sandboxCheckResult?.verificationLog || latestVerificationLog).map((line: string, idx: number) => {
+                      const isFail = line.includes('FAIL') || line.includes('error') || line.includes('✗');
+                      const isPass = line.includes('PASS') || line.includes('✓') || line.includes('Passed');
+                      const isWarn = line.includes('WARN') || line.includes('notice');
+                      return (
+                        <div
+                          key={idx}
+                          className={`font-mono text-xs ${
+                            isFail
+                              ? 'text-red-400 font-semibold'
+                              : isPass
+                              ? 'text-emerald-400'
+                              : isWarn
+                              ? 'text-amber-300'
+                              : 'text-neutral-300'
+                          }`}
+                        >
+                          {line}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
 
-          {/* STDOUT / Output Panel */}
-          <div className="h-44 sm:h-52 bg-[#0F0F0F] text-[#E0E0E0] p-3 font-mono text-xs overflow-y-auto flex flex-col">
-            <div className="text-[10px] uppercase text-[#666666] mb-1 font-bold tracking-wider select-none">
-              Console STDOUT / STDERR
-            </div>
-            <pre className="flex-1 whitespace-pre-wrap leading-relaxed text-emerald-400">
-              {terminalOutput}
-            </pre>
+                {/* Stdout / Stderr details */}
+                {sandboxCheckResult?.stdout && (
+                  <div className="mt-3 pt-3 border-t border-[#252525] space-y-1">
+                    <div className="text-[10px] uppercase text-[#888888] font-bold tracking-wider select-none">
+                      Sandbox stdout:
+                    </div>
+                    <pre className="text-neutral-300 whitespace-pre-wrap">{sandboxCheckResult.stdout}</pre>
+                  </div>
+                )}
+
+                {sandboxCheckResult?.stderr && (
+                  <div className="mt-3 pt-3 border-t border-[#252525] space-y-1">
+                    <div className="text-[10px] uppercase text-red-400 font-bold tracking-wider select-none">
+                      Sandbox stderr:
+                    </div>
+                    <pre className="text-red-400 whitespace-pre-wrap">{sandboxCheckResult.stderr}</pre>
+                  </div>
+                )}
+
+                {terminalOutput &&
+                  !sandboxCheckResult?.verificationLog &&
+                  (!latestVerificationLog || latestVerificationLog.length === 0) && (
+                    <pre className="text-neutral-300 whitespace-pre-wrap">{terminalOutput}</pre>
+                  )}
+              </>
+            )}
           </div>
         </div>
       )}
 
       {/* Tab 3: GitHub PR Action Bar (Developer Mode Only) */}
-      {currentMode === 'developer' && activeTab === 'github' && (
+      {(currentMode === 'developer' || currentMode === 'build') && activeTab === 'github' && (
         <div id="github-pr-content" className="flex-1 flex flex-col p-4 overflow-y-auto space-y-4">
           <div className="flex items-center gap-2 pb-2 border-b border-[#E5E2DC]">
             <GitPullRequest className="w-5 h-5 text-purple-600" />
@@ -2122,7 +2594,7 @@ captured
                 <span>Pull Request Created Successfully!</span>
               </div>
               <p className="text-xs leading-relaxed text-emerald-800">
-                {prMessage || "Branch 'fix/esewa-signature-verify' was created and merged into PR."}
+                {prMessage || `Branch '${featureBranch}' was created and merged into PR.`}
               </p>
               {prStats && (
                 <div className="flex items-center gap-3 text-[11px] font-mono pt-0.5">
@@ -2192,7 +2664,7 @@ captured
                 </label>
                 <div className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-[#E5E2DC] bg-[#F3EFEA] text-[#736E67]">
                   <GitBranch className="w-3.5 h-3.5" />
-                  <span className="font-mono text-[11px] truncate">fix/esewa-patch</span>
+                  <span className="font-mono text-[11px] truncate">{featureBranch}</span>
                 </div>
               </div>
             </div>

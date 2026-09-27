@@ -126,6 +126,11 @@ export type WebBuildStack = 'html-css-js' | 'react' | 'vue' | 'nextjs';
 export type MobileBuildStack = 'react-native' | 'flutter';
 export type BuildStack = WebBuildStack | MobileBuildStack;
 
+export interface ProjectFile {
+  path: string;
+  content: string;
+}
+
 export interface WebappBuildData {
   appName: string;
   html: string;

@@ -10,10 +10,186 @@ import type { BuildStack } from './types';
 export const DEFAULT_WEBAPP_NAME = 'your-app-name';
 export const WEBAPP_STORAGE_PREFIX = 'alphanex_webapp_code_';
 export const ACTIVE_APP_NAME_KEY = 'alphanex_active_app_name';
+export const WEBAPP_VERIFICATION_PREFIX = 'alphanex_webapp_verification_';
 
 export interface WebAppPage {
   path: string;
   html: string;
+}
+
+export interface ProjectFile {
+  path: string;
+  content: string;
+}
+
+export interface WebAppVerificationData {
+  verificationLog?: string[];
+  stdout?: string;
+  stderr?: string;
+  passed?: boolean;
+  checksRun?: number;
+  checksPassed?: number;
+  timestamp?: number;
+}
+
+/**
+ * Persists verification results in localStorage
+ */
+export function saveWebAppVerification(appName: string, data: WebAppVerificationData): void {
+  if (typeof window === 'undefined') return;
+  const slug = slugifyAppName(appName);
+  try {
+    localStorage.setItem(`${WEBAPP_VERIFICATION_PREFIX}${slug}`, JSON.stringify(data));
+  } catch (err) {
+    console.warn('Failed to save web app verification to localStorage:', err);
+  }
+}
+
+/**
+ * Retrieves verification results from localStorage
+ */
+export function getWebAppVerification(appName?: string): WebAppVerificationData | null {
+  if (typeof window === 'undefined') return null;
+  const slug = appName
+    ? slugifyAppName(appName)
+    : localStorage.getItem(ACTIVE_APP_NAME_KEY) || DEFAULT_WEBAPP_NAME;
+  try {
+    const saved = localStorage.getItem(`${WEBAPP_VERIFICATION_PREFIX}${slug}`);
+    if (saved) return JSON.parse(saved);
+  } catch (err) {
+    console.warn('Failed to read web app verification from localStorage:', err);
+  }
+  return null;
+}
+
+/**
+ * Normalizes any combination of pages, fallback html, and GitHub attachments into ProjectFile[]
+ * Deduplicates by clean path and drops empty paths/contents.
+ */
+export function normalizeProjectFiles(
+  pages?: { path: string; html?: string; content?: string }[],
+  fallbackHtml?: string,
+  attachments?: { path?: string; name?: string; content?: string }[]
+): ProjectFile[] {
+  const fileMap = new Map<string, string>();
+
+  // 1. Process pages
+  if (pages && Array.isArray(pages)) {
+    for (const p of pages) {
+      if (!p) continue;
+      const rawPath = (p.path || '').trim();
+      const content = p.content !== undefined ? p.content : p.html !== undefined ? p.html : '';
+      if (rawPath && content.trim()) {
+        const cleanPath = rawPath.startsWith('/') ? rawPath.slice(1) : rawPath;
+        fileMap.set(cleanPath, content);
+      }
+    }
+  }
+
+  // 2. If no files yet and fallbackHtml exists, add as index.html
+  if (fileMap.size === 0 && fallbackHtml && fallbackHtml.trim()) {
+    fileMap.set('index.html', fallbackHtml.trim());
+  }
+
+  // 3. Attachments (e.g. GitHub files)
+  if (attachments && Array.isArray(attachments)) {
+    for (const att of attachments) {
+      if (!att) continue;
+      const rawPath = (att.path || att.name || '').trim();
+      const content = (att.content || '').trim();
+      if (rawPath && content) {
+        const cleanPath = rawPath.startsWith('/') ? rawPath.slice(1) : rawPath;
+        if (!fileMap.has(cleanPath)) {
+          fileMap.set(cleanPath, att.content || '');
+        }
+      }
+    }
+  }
+
+  return Array.from(fileMap.entries()).map(([path, content]) => ({ path, content }));
+}
+
+/**
+ * Persists multi-page web app structures in localStorage under ${WEBAPP_STORAGE_PREFIX}${slug}_pages
+ */
+export function bundleProjectForPreview(
+  files: ProjectFile[],
+  selectedPath?: string
+): { html: string; previewPath: string; isHtml: boolean } {
+  if (!files || files.length === 0) {
+    return { html: '', previewPath: '', isHtml: false };
+  }
+
+  // Find target HTML file to preview
+  let targetFile: ProjectFile | undefined;
+  if (selectedPath && (selectedPath.endsWith('.html') || selectedPath.endsWith('.htm'))) {
+    targetFile = files.find((f) => f.path === selectedPath);
+  }
+  if (!targetFile) {
+    targetFile =
+      files.find((f) => f.path === 'index.html') ||
+      files.find((f) => f.path.endsWith('.html') || f.path.endsWith('.htm')) ||
+      files.find((f) => f.content.includes('<html') || f.content.includes('<!DOCTYPE'));
+  }
+
+  if (!targetFile) {
+    // No HTML file found at all in project
+    return { html: '', previewPath: selectedPath || files[0].path, isHtml: false };
+  }
+
+  let html = targetFile.content;
+
+  // Process CSS files
+  const cssFiles = files.filter(
+    (f) => f.path.endsWith('.css') && f.path !== targetFile?.path
+  );
+  for (const css of cssFiles) {
+    const filename = css.path.split('/').pop() || css.path;
+    const linkRegex = new RegExp(
+      `<link[^>]*href=["'](?:\\.\\/)?${filename.replace('.', '\\.')}["'][^>]*>`,
+      'gi'
+    );
+    const styleTag = `<style data-source="${filename}">\n${css.content}\n</style>`;
+    if (linkRegex.test(html)) {
+      html = html.replace(linkRegex, styleTag);
+    } else {
+      // If not explicitly linked, inject into head or start
+      if (html.includes('</head>')) {
+        html = html.replace('</head>', `${styleTag}\n</head>`);
+      } else {
+        html = `${styleTag}\n${html}`;
+      }
+    }
+  }
+
+  // Process JS files
+  const jsFiles = files.filter(
+    (f) =>
+      (f.path.endsWith('.js') || f.path.endsWith('.mjs')) &&
+      f.path !== targetFile?.path &&
+      !f.path.includes('.test.') &&
+      !f.path.includes('.config.')
+  );
+  for (const js of jsFiles) {
+    const filename = js.path.split('/').pop() || js.path;
+    const scriptRegex = new RegExp(
+      `<script[^>]*src=["'](?:\\.\\/)?${filename.replace('.', '\\.')}["'][^>]*>\\s*<\\/script>`,
+      'gi'
+    );
+    const scriptTag = `<script data-source="${filename}">\n${js.content}\n</script>`;
+    if (scriptRegex.test(html)) {
+      html = html.replace(scriptRegex, scriptTag);
+    } else {
+      // Inject before </body> or append
+      if (html.includes('</body>')) {
+        html = html.replace('</body>', `${scriptTag}\n</body>`);
+      } else {
+        html = `${html}\n${scriptTag}`;
+      }
+    }
+  }
+
+  return { html, previewPath: targetFile.path, isHtml: true };
 }
 
 /**
