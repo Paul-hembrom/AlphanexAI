@@ -93,7 +93,7 @@ export default function ResearcherTab({
             </span>
           </div>
 
-          {/* Serper / SearXNG */}
+          {/* Serper (Google index) */}
           <div
             onClick={() => setProvider('serper_searxng')}
             className={`p-3.5 rounded-xl border transition-all cursor-pointer flex flex-col justify-between ${
@@ -104,15 +104,15 @@ export default function ResearcherTab({
           >
             <div>
               <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-[#1F1E1D]">Serper / SearXNG Open Index</span>
+                <span className="text-xs font-bold text-[#1F1E1D]">Serper (Google index)</span>
                 {provider === 'serper_searxng' && <Check className="w-3.5 h-3.5 text-blue-600" />}
               </div>
               <p className="text-[11px] text-[#736E67] mt-1.5 leading-relaxed">
-                Deep Google index scraping with multi-engine SearXNG meta-search fallback for niche local forums.
+                Direct Google SERP retrieval with answer boxes, organic ranking, and regional gl/hl geographic filtering.
               </p>
             </div>
             <span className="mt-2 text-[10px] font-bold text-blue-800 bg-blue-50 px-2 py-0.5 rounded w-fit border border-blue-200">
-              Raw Broad Index
+              Google Index • Broad SERP
             </span>
           </div>
         </div>

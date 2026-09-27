@@ -139,16 +139,45 @@ export async function searchSerper(
  * Converts Serper search hits into application Citation objects for UI rendering.
  */
 export function serperResultsToCitations(results: SerperSearchResult[]): Citation[] {
-  return results.map((result, index) => ({
-    id: `serper-${index + 1}`,
-    sourceName: result.sourceName,
-    source: result.sourceName,
-    title: result.title,
-    url: result.link,
-    snippet: result.snippet || 'Live search result from Google index via Serper.',
-    reliabilityScore: 98,
-    reliability: 'High (Verified SERP)',
-  }));
+  return results.map((result, index) => {
+    const host = (result.sourceName || extractSourceName(result.link)).toLowerCase();
+    const isOfficial =
+      host.endsWith('.gov.np') ||
+      host.endsWith('.gov') ||
+      host.endsWith('.edu.np') ||
+      host.endsWith('.edu') ||
+      host.endsWith('.org.np') ||
+      host.includes('arxiv.org') ||
+      host.includes('who.int') ||
+      host.includes('worldbank.org') ||
+      host.includes('reuters.com') ||
+      host.includes('apnews.com');
+
+    let reliabilityScore: number | undefined;
+    let reliability: string | undefined;
+
+    if (isOfficial) {
+      reliabilityScore = 92;
+      reliability = 'High (Official / Institutional)';
+    } else if (result.position && result.position <= 3) {
+      reliabilityScore = 85;
+      reliability = 'Verified (Top Search Rank)';
+    } else if (result.position && result.position <= 8) {
+      reliabilityScore = 75;
+      reliability = 'Standard (Web Reference)';
+    }
+
+    return {
+      id: `serper-${index + 1}`,
+      sourceName: result.sourceName,
+      source: result.sourceName,
+      title: result.title,
+      url: result.link,
+      snippet: result.snippet || 'Live search result from Google index via Serper.',
+      ...(reliabilityScore !== undefined ? { reliabilityScore } : {}),
+      ...(reliability !== undefined ? { reliability } : {}),
+    };
+  });
 }
 
 /**

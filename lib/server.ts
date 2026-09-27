@@ -210,22 +210,18 @@ export class ParallelRetriever {
     private languageCode = 'en'
   ) {}
 
-  async searchQuery(query: string, numResults = 4): Promise<SearchHit[]> {
+  async searchQuery(
+    query: string,
+    numResults = 4,
+    opts?: { countryCode?: string; languageCode?: string }
+  ): Promise<SearchHit[]> {
     if (!this.serperKey) {
-      // Fallback search mock if Serper key is absent, generating grounded mock search records
-      return [
-        {
-          title: `Technical Analysis: ${query}`,
-          link: `https://en.wikipedia.org/wiki/${encodeURIComponent(query.slice(0, 30))}`,
-          snippet: `Comprehensive overview, key architectural trade-offs, and industry implementations regarding ${query}.`,
-        },
-        {
-          title: `Documentation & Standards Reference for ${query}`,
-          link: `https://developer.mozilla.org/search?q=${encodeURIComponent(query.slice(0, 30))}`,
-          snippet: `Standardized specifications, API contracts, deployment considerations, and benchmarks.`,
-        },
-      ];
+      // Honest failure: Return empty array when Serper key is absent. Never fabricate mock results.
+      return [];
     }
+
+    const gl = opts?.countryCode || this.countryCode;
+    const hl = opts?.languageCode || this.languageCode;
 
     let data: any;
     try {
@@ -235,8 +231,8 @@ export class ParallelRetriever {
         body: JSON.stringify({
           q: query,
           num: numResults,
-          gl: this.countryCode,
-          hl: this.languageCode,
+          gl,
+          hl,
         }),
         signal: AbortSignal.timeout(8000),
       });
@@ -325,6 +321,20 @@ export const retriever = new ParallelRetriever(
   process.env.SERPER_GL ?? 'us',
   process.env.SERPER_HL ?? 'en'
 );
+
+export function createParallelRetriever(options?: {
+  serperKey?: string;
+  jinaKey?: string;
+  countryCode?: string;
+  languageCode?: string;
+}): ParallelRetriever {
+  const serperKey =
+    options?.serperKey || process.env.SERPER_API_KEY || process.env.serper_api_key || '';
+  const jinaKey = options?.jinaKey || process.env.JINA_API_KEY || undefined;
+  const gl = options?.countryCode || process.env.SERPER_GL || 'us';
+  const hl = options?.languageCode || process.env.SERPER_HL || 'en';
+  return new ParallelRetriever(serperKey, jinaKey, gl, hl);
+}
 
 // -----------------------------------------------------------------------------
 // 5. NEURAL / BM25 RERANKER

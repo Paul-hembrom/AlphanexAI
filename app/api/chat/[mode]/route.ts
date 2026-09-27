@@ -3,12 +3,8 @@ import { GoogleGenAI } from '@google/genai';
 import { Citation, DiffData, WorkMode } from '@/lib/types';
 import { getOpenRouterApiKey, streamOpenRouter } from '@/lib/openrouter';
 import { isAppBuildRequest, buildApplicationFromPrompt } from '@/lib/webapp-builder';
-import {
-  searchSerper,
-  serperResultsToCitations,
-  formatSerperResultsForGrounding,
-  isResearchQuery,
-} from '@/lib/serper';
+import { isResearchQuery } from '@/lib/serper';
+import { runResearch } from '@/lib/research-engine';
 import { createClient, isSupabaseServerConfigured } from '@/lib/supabase/server';
 import { createAdminClient, isAdminConfigured } from '@/lib/supabase/admin';
 import { recordTokenUsage, checkPlanLimits, touchActiveSession } from '@/lib/usage-tracking';
@@ -89,6 +85,7 @@ export async function POST(
   }
 
   // 3. Check monthly plan token limit and concurrent sessions
+  let userPlanTier = 'lite';
   if (authenticatedUserId) {
     const limitCheck = await checkPlanLimits(authenticatedUserId);
     if (!limitCheck.allowed) {
@@ -112,7 +109,42 @@ export async function POST(
         }
       );
     }
+    userPlanTier = limitCheck.planTier || 'lite';
     touchActiveSession(authenticatedUserId).catch(() => {});
+  }
+
+  // 4. Load user profile settings for live research & grounding preferences
+  let userProfileSettings = {
+    searchProvider: 'serper_searxng' as 'tavily' | 'serper_searxng',
+    nepaliGroundingBias: true,
+    citationDensity: 'inline_brackets' as 'inline_brackets' | 'footnote_bibliography',
+  };
+
+  if (authenticatedUserId && isAdminConfigured()) {
+    try {
+      const admin = createAdminClient();
+      const { data: prof } = await admin
+        .from('profiles')
+        .select('*')
+        .eq('id', authenticatedUserId)
+        .maybeSingle();
+
+      if (prof) {
+        if (prof.search_provider === 'tavily' || prof.searchProvider === 'tavily') {
+          userProfileSettings.searchProvider = 'tavily';
+        }
+        if (typeof prof.nepali_grounding_bias === 'boolean') {
+          userProfileSettings.nepaliGroundingBias = prof.nepali_grounding_bias;
+        } else if (typeof prof.nepaliGroundingBias === 'boolean') {
+          userProfileSettings.nepaliGroundingBias = prof.nepaliGroundingBias;
+        }
+        if (prof.citation_density === 'footnote_bibliography' || prof.citationDensity === 'footnote_bibliography') {
+          userProfileSettings.citationDensity = 'footnote_bibliography';
+        }
+      }
+    } catch (profErr) {
+      console.warn('[chat/route] Could not load user profile settings:', profErr);
+    }
   }
 
   // Create a ReadableStream for SSE
@@ -208,7 +240,7 @@ export async function POST(
           return;
         }
 
-        // Researcher Mode: Perform real Serper search if SERPER_API_KEY is available and query has research intent
+        // Researcher Mode: Run multi-stage live research loop if query has research intent
         let serperCitations: Citation[] = [];
         let baseSysInstruction =
           params.systemInstruction ||
@@ -221,26 +253,65 @@ export async function POST(
         const isResearch = mode === 'researcher' && isResearchQuery(prompt);
 
         if (isResearch) {
-          const serperKey = process.env.SERPER_API_KEY?.trim() || process.env.serper_api_key?.trim();
-          if (serperKey && serperKey !== 'MY_SERPER_API_KEY') {
-            try {
+          const researchResult = await runResearch(prompt, {
+            effort: reasoningEffort,
+            planTier: userPlanTier,
+            searchProvider: userProfileSettings.searchProvider,
+            nepaliGroundingBias: userProfileSettings.nepaliGroundingBias,
+            citationDensity: userProfileSettings.citationDensity,
+            onProgress: (p) => {
               sendEvent({
                 type: 'thinking',
-                content: `Searching live web via Google Serper for: "${prompt.slice(0, 80)}"...`,
+                content: p.message,
               });
-              const serperHits = await searchSerper(prompt, { apiKey: serperKey, numResults: 5 });
-              if (serperHits.length > 0) {
-                serperCitations = serperResultsToCitations(serperHits);
-                const groundingContext = formatSerperResultsForGrounding(serperHits);
+            },
+          });
 
-                baseSysInstruction += `\n\n### Verified Real-Time Web Search Results (via Google Serper):\n${groundingContext}\n\nGrounding & Citation Directives:\n- Incorporate the above verified live search results directly into your research answer.\n- Use inline markdown links or bracketed citations referencing the exact source titles and publishers.\n- Prioritize verified current facts, dates, and metrics from these live search results over pre-trained general knowledge.`;
+          if (researchResult.effortCappedNotice) {
+            sendEvent({
+              type: 'thinking',
+              content: researchResult.effortCappedNotice,
+            });
+          }
 
-                // Emit Serper citations to client UI so live citation chips display real search results
-                sendEvent({ type: 'citations', citations: serperCitations });
-              }
-            } catch (serperErr: any) {
-              console.warn('[Serper Search] Failed to retrieve live search results, falling back to Gemini grounding:', serperErr?.message || serperErr);
+          if (researchResult.success && researchResult.hits.length > 0) {
+            serperCitations = researchResult.citations;
+            sendEvent({ type: 'citations', citations: serperCitations });
+
+            let citationDirective = '';
+            if (userProfileSettings.citationDensity === 'footnote_bibliography') {
+              citationDirective =
+                'Citation Directive: Use superscript-style [n] footnotes after factual claims and end with a "## Sources" bibliography listing the exact retrieved URLs.';
+            } else {
+              citationDirective =
+                'Citation Directive: After each factual claim add [n] matching the source list (e.g. [1], [2]). Every factual claim must be strictly grounded in the retrieved sources above.';
             }
+
+            if (researchResult.effectiveEffort === 'Max') {
+              citationDirective +=
+                '\nAnalysis Directive: Critically evaluate conflicts between sources and explicitly highlight any divergent statistics, dates, or contradictory findings in a dedicated "Source Divergence & Fact-Check" section.';
+            }
+
+            baseSysInstruction += `\n\n${researchResult.groundingMarkdown}\n\n${citationDirective}\n- Prioritize verified facts, dates, and metrics from these retrieved live sources.\n- Never fabricate or cite URLs, papers, or organizations that do not appear in the retrieved sources above.`;
+
+            sendEvent({
+              type: 'thinking',
+              content: `Retrieved ${researchResult.hits.length} live source(s) and read ${Object.keys(researchResult.scraped).length} full page(s). Synthesizing grounded research answer...`,
+            });
+          } else {
+            // Zero hits or unconfigured search: never emit fake citations
+            sendEvent({ type: 'citations', citations: [] });
+
+            const failureReason = researchResult.needsSearchKey
+              ? 'Search engine is unconfigured (missing SERPER_API_KEY/TAVILY_API_KEY).'
+              : 'Live web search returned no accessible results.';
+
+            sendEvent({
+              type: 'thinking',
+              content: `Notice: ${failureReason} No live sources were retrieved. Treat the following as unverified model knowledge.`,
+            });
+
+            baseSysInstruction += `\n\n### Grounding Notice: ${failureReason} No live sources were retrieved. Treat the following response as unverified model knowledge.\nPrefix your answer with: "> ⚠️ **Notice**: No live sources were retrieved (${failureReason}). Treat the following as unverified model knowledge.\n\n"`;
           }
         }
         // Inject attached repository files into system instruction / context
