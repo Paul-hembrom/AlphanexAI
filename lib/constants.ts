@@ -277,6 +277,10 @@ export const DEFAULT_SYSTEM_INSTRUCTIONS: Record<WorkMode, string> = {
 - Provide direct, thoughtful, and articulate responses with warm minimalist tone.
 - Break complex subjects into accessible, structured explanations.
 - Adapt tone dynamically to technical inquiries, conceptual drafting, or strategic planning.`,
+
+  build: `You are Alphanex Build Mode. Plan, generate, test, repair, and optionally polish apps.
+Prefer Nepal-relevant stacks already used in developer mode (Next.js, FastAPI, eSewa/Khalti, React Native later).
+Do not claim tests passed unless the preview harness actually ran.`,
 };
 
 export const INITIAL_WORKSPACE_PARAMS: WorkspaceParams = {
@@ -342,6 +346,23 @@ export const SAMPLE_PROMPTS_BY_MODE: Record<WorkMode, { title: string; prompt: s
       title: 'Career Roadmap: Transitioning to ML Engineering in Nepal',
       prompt: 'Outline a realistic 6-month study roadmap for a mid-level web developer in Nepal aiming to transition into open-source AI and fine-tuning roles.',
       description: 'Structured milestones & recommended resources',
+    },
+  ],
+  build: [
+    {
+      title: 'Basic E-Commerce Store',
+      prompt: 'Build a basic ecommerce site with catalog and checkout modal',
+      description: 'Interactive product catalog, bag drawer, and modal checkout',
+    },
+    {
+      title: 'eSewa Signature Verifier',
+      prompt: 'Fix eSewa v2 callback signature verification',
+      description: 'HMAC-SHA256 signature verification and callback debug harness',
+    },
+    {
+      title: 'School Notice Board',
+      prompt: 'Build a school notice board site for a Nepali campus',
+      description: 'Campus announcement board with category tags and notice cards',
     },
   ],
 };

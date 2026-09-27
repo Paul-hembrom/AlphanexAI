@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef, useEffect, useCallback, useSyncExternalStore } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo, useSyncExternalStore } from 'react';
 import { ChevronRight, ChevronLeft, PanelRight, GripVertical, Terminal } from 'lucide-react';
 import Header from '@/components/Header';
 import Sidebar from '@/components/Sidebar';
@@ -27,7 +27,9 @@ import {
   BuildStack,
   BuildProgressStep,
   ChatAttachment,
+  BuildStage,
 } from '@/lib/types';
+import { resolvePlanTier, getPlanDisplayName, canUseModel } from '@/lib/plan-allowance';
 import {
   saveWebAppData,
   saveWebAppPages,
@@ -167,13 +169,57 @@ export default function WorkspaceView() {
   const [threads, setThreads] = useState<ChatThread[]>([]);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
 
-  // User Wallet State
+  // User Wallet State (Default: Free Tier for new users / unauthenticated guests)
   const [wallet, setWallet] = useState<UserWallet>({
-    credits: 420,
-    plan: 'Pro Builder',
-    totalTokensUsed: 142050,
-    planTokenLimit: 2500000,
+    credits: 0,
+    plan: 'Free Tier',
+    totalTokensUsed: 0,
+    planTokenLimit: 500000,
   });
+
+  const effectivePlanTier = activeProfile?.planTier
+    ? resolvePlanTier(activeProfile.planTier)
+    : resolvePlanTier(wallet.plan);
+
+  const displayPlanName = activeProfile?.planTier
+    ? getPlanDisplayName(activeProfile.planTier)
+    : wallet.plan;
+
+  const effectiveWallet: UserWallet = useMemo(() => ({
+    ...wallet,
+    plan: displayPlanName,
+    planTier: effectivePlanTier,
+  }), [wallet, displayPlanName, effectivePlanTier]);
+
+  // Build Mode Daily Passes State
+  const [buildPasses, setBuildPasses] = useState<{
+    generate: number;
+    reviewRepair: number;
+    polish: number;
+  }>({
+    generate: 0,
+    reviewRepair: 0,
+    polish: 0,
+  });
+
+  const refreshBuildQuota = useCallback(() => {
+    fetch('/api/build/quota')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data?.quotas) {
+          setBuildPasses({
+            generate: data.quotas.generate?.remaining ?? 0,
+            reviewRepair: data.quotas.reviewRepair?.remaining ?? 0,
+            polish: data.quotas.polish?.remaining ?? 0,
+          });
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    refreshBuildQuota();
+  }, [refreshBuildQuota, currentMode]);
 
   // UI Panels State
   const [isParameterDrawerOpen, setIsParameterDrawerOpen] = useState(false);
@@ -484,8 +530,18 @@ export default function WorkspaceView() {
     }
   };
 
+  // Open Payment Modal with specific intended tier if locked
+  const handleOpenPaymentModal = useCallback((tier?: ModelTier) => {
+    setIntendedTier(tier);
+    setIsPaymentModalOpen(true);
+  }, []);
+
   // Dynamic Mode Switch Handler (updates instructions, active thread, chat stream on the fly)
-  const handleChangeMode = (newMode: WorkMode) => {
+  const handleChangeMode = useCallback((newMode: WorkMode) => {
+    if (newMode === 'build' && effectivePlanTier === 'lite') {
+      handleOpenPaymentModal('plus');
+      return;
+    }
     if (newMode === currentMode) return;
     setCurrentMode(newMode);
     setWorkspaceParams((prev) => ({
@@ -498,9 +554,10 @@ export default function WorkspaceView() {
     const currentActiveId = activeThreadIdRef.current;
     if (currentActiveId) {
       updateStoredThreadMode(currentActiveId, newMode);
+      const switchTime = Date.now();
       setThreads((prev) =>
         prev.map((t) =>
-          t.id === currentActiveId ? { ...t, mode: newMode, updatedAt: Date.now() } : t
+          t.id === currentActiveId ? { ...t, mode: newMode, updatedAt: switchTime } : t
         )
       );
 
@@ -509,25 +566,30 @@ export default function WorkspaceView() {
         developer: 'Developer Mode (Code Inspection & Side-by-Side Diffs active)',
         researcher: 'Researcher Mode (Web Grounding & Academic Citations active)',
         general: 'General Mode (Conversational Synthesis & Drafting active)',
+        build: 'Build Mode (Autonomous App Factory & Real Preview active)',
       };
 
       const systemNotice: ChatMessage = {
-        id: `sys-mode-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        id: `sys-mode-${switchTime}-${newMode}`,
         role: 'system',
         content: `Mode switched to ${modeLabels[newMode]}`,
-        timestamp: Date.now(),
+        timestamp: switchTime,
         mode: newMode,
         modelId: selectedModel.id,
       };
 
       setMessages((prev) => {
         if (prev.length > 0) {
-          const updated = [...prev, systemNotice];
-          updateStoredThreadMessages(currentActiveId, updated);
-          return updated;
+          return [...prev, systemNotice];
         }
         return prev;
       });
+
+      const allThreads = getStoredThreads();
+      const target = allThreads.find((t) => t.id === currentActiveId);
+      if (target && target.messages.length > 0) {
+        updateStoredThreadMessages(currentActiveId, [...target.messages, systemNotice]);
+      }
     }
 
     // Update URL query parameter cleanly without reloading
@@ -538,28 +600,34 @@ export default function WorkspaceView() {
         window.history.replaceState({}, '', url.toString());
       } catch {}
     }
-  };
+  }, [currentMode, effectivePlanTier, handleOpenPaymentModal, selectedModel.id]);
 
   // Model Select Handler
   const handleSelectModel = (model: ModelInfo) => {
+    const access = canUseModel({
+      planTier: effectivePlanTier,
+      modelTier: model.tier,
+      credits: effectiveWallet.credits,
+    });
+    if (!access.allowed) {
+      handleOpenPaymentModal(access.suggestedAction === 'upgrade_pro' ? 'pro' : 'plus');
+      return;
+    }
     setSelectedModel(model);
     if (activeThreadIdRef.current) {
       updateStoredThreadModel(activeThreadIdRef.current, model.id);
     }
   };
 
-  // Open Payment Modal with specific intended tier if locked
-  const handleOpenPaymentModal = (tier?: ModelTier) => {
-    setIntendedTier(tier);
-    setIsPaymentModalOpen(true);
-  };
-
   // Payment Success Handler
-  const handlePaymentSuccess = (addedCredits: number, newPlan?: 'Starter' | 'Pro Builder') => {
+  const handlePaymentSuccess = (addedCredits: number) => {
+    // TODO: Connect real eSewa / Khalti HMAC callback verification before promoting user plan.
+    // Do NOT mark plan_tier paid on a dummy QR success; keep users on lite.
+    // Dummy "payment success -> Pro Builder" is a billing bug.
     setWallet((prev) => ({
       ...prev,
       credits: prev.credits + addedCredits,
-      plan: newPlan || prev.plan,
+      plan: prev.plan,
     }));
   };
 
@@ -686,7 +754,10 @@ export default function WorkspaceView() {
   }, []);
 
   // Send Message with SSE Stream
-  const handleSendMessage = async (userText: string) => {
+  const handleSendMessage = async (
+    userText: string,
+    options?: { stage?: BuildStage; polish?: boolean }
+  ) => {
     if (!userText.trim() || isStreaming) return;
 
     // Check authentication if Supabase is configured
@@ -695,8 +766,25 @@ export default function WorkspaceView() {
       return;
     }
 
-    // Check credits if model costs credits
-    if (selectedModel.costPerQueryCredits > 0 && wallet.credits < selectedModel.costPerQueryCredits) {
+    // Build Mode is locked for Free Tier (lite)
+    if (currentMode === 'build' && effectivePlanTier === 'lite') {
+      handleOpenPaymentModal('plus');
+      return;
+    }
+
+    // Check access strictly via canUseModel — Credits NEVER unlock paid models on Free Tier
+    const access = canUseModel({
+      planTier: effectivePlanTier,
+      modelTier: selectedModel.tier,
+      credits: effectiveWallet.credits,
+    });
+    if (!access.allowed) {
+      handleOpenPaymentModal(access.suggestedAction === 'upgrade_pro' ? 'pro' : 'plus');
+      return;
+    }
+
+    // Check credits if model costs credits (applicable only on mid/upper)
+    if (selectedModel.costPerQueryCredits > 0 && effectiveWallet.credits < selectedModel.costPerQueryCredits) {
       handleOpenPaymentModal('vault');
       return;
     }
@@ -756,6 +844,8 @@ export default function WorkspaceView() {
           prompt: userText,
           mode: currentMode,
           modelId: selectedModel.id,
+          stage: options?.stage || (options?.polish ? 'polish' : undefined),
+          polish: options?.polish,
           reasoningEffort: currentMode === 'researcher' || selectedModel.supportsThinking ? reasoningEffort : undefined,
           params: workspaceParams,
           buildStack: selectedBuildStack,
@@ -995,6 +1085,7 @@ export default function WorkspaceView() {
                     totalTokensUsed: prev.totalTokensUsed + (data.tokens?.totalTokens || 500),
                   }));
                 }
+                refreshBuildQuota();
               }
             } catch (err) {
               console.error('Error parsing SSE chunk:', err);
@@ -1211,6 +1302,13 @@ export default function WorkspaceView() {
     }
   };
 
+  const handleFinalReview = (appName: string) => {
+    handleSendMessage(`Final review and polish for ${appName || 'webapp'}`, {
+      stage: 'polish',
+      polish: true,
+    });
+  };
+
   return (
     <div
       id="workspace-root"
@@ -1224,7 +1322,7 @@ export default function WorkspaceView() {
         onSelectModel={handleSelectModel}
         reasoningEffort={reasoningEffort}
         onChangeEffort={setReasoningEffort}
-        wallet={wallet}
+        wallet={effectiveWallet}
         onOpenPaymentModal={handleOpenPaymentModal}
         isParameterDrawerOpen={isParameterDrawerOpen}
         onToggleParameterDrawer={() => setIsParameterDrawerOpen(!isParameterDrawerOpen)}
@@ -1257,7 +1355,7 @@ export default function WorkspaceView() {
           isOpen={isSidebarOpen}
           onToggle={() => setIsSidebarOpen((prev) => !prev)}
           profile={activeProfile}
-          wallet={wallet}
+          wallet={effectiveWallet}
           user={user}
           onOpenSignIn={() => setIsSignInModalOpen(true)}
           onSignOut={signOut}
@@ -1301,11 +1399,14 @@ export default function WorkspaceView() {
             onOpenInCanvas={handleOpenInCanvas}
             onOpenWebPreview={handleOpenWebPreview}
             onSelectPrompt={(text) => handleSendMessage(text)}
-            userCredits={wallet.credits}
+            userCredits={effectiveWallet.credits}
             onChangeMode={handleChangeMode}
             pendingAttachments={pendingAttachments}
             onRemoveAttachment={handleRemovePendingAttachment}
             onOpenRepoBrowser={() => setIsRepoBrowserOpen(true)}
+            userPlanTier={effectivePlanTier}
+            polishRemaining={buildPasses.polish}
+            onFinalReview={handleFinalReview}
           />
         </div>
 
@@ -1610,7 +1711,7 @@ export default function WorkspaceView() {
       <PaymentModal
         isOpen={isPaymentModalOpen}
         onClose={() => setIsPaymentModalOpen(false)}
-        wallet={wallet}
+        wallet={effectiveWallet}
         onPaymentSuccess={handlePaymentSuccess}
         initialIntendedTier={intendedTier}
       />
@@ -1625,7 +1726,7 @@ export default function WorkspaceView() {
           setUserProfile(updated);
           saveStoredProfile(updated);
         }}
-        wallet={wallet}
+        wallet={effectiveWallet}
         onTopUpSuccess={handlePaymentSuccess}
         onExportData={() => {}}
         onClearHistory={handleClearAllThreads}

@@ -7,6 +7,8 @@ import {
   Code2,
   BookOpen,
   MessageSquare,
+  Hammer,
+  Lock,
   Sliders,
   PanelRight,
   PanelLeft,
@@ -25,6 +27,7 @@ import {
 } from 'lucide-react';
 import type { User } from '@supabase/supabase-js';
 import { WorkMode, ModelInfo, ReasoningEffort, UserWallet, ModelTier, UserProfileSettings } from '@/lib/types';
+import { resolvePlanTier } from '@/lib/plan-allowance';
 import ModelSelector from './ModelSelector';
 import EffortSlider from './EffortSlider';
 
@@ -83,6 +86,44 @@ export default function Header({
   onOpenSignIn,
   onSignOut,
 }: HeaderProps) {
+  const planTier = profile?.planTier || resolvePlanTier(wallet.plan);
+  const isFreeUser = planTier === 'lite';
+
+  const [buildPasses, setBuildPasses] = React.useState<{
+    generate: number;
+    reviewRepair: number;
+    polish: number;
+  }>({
+    generate: planTier === 'upper' ? 50 : planTier === 'mid' ? 20 : 0,
+    reviewRepair: planTier === 'upper' ? 20 : planTier === 'mid' ? 8 : 0,
+    polish: planTier === 'upper' ? 3 : planTier === 'mid' ? 1 : 0,
+  });
+
+  React.useEffect(() => {
+    if (currentMode === 'build' && !isFreeUser) {
+      fetch('/api/build/quota')
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data) => {
+          if (data?.quotas) {
+            setBuildPasses({
+              generate: data.quotas.generate?.remaining ?? 0,
+              reviewRepair: data.quotas.reviewRepair?.remaining ?? 0,
+              polish: data.quotas.polish?.remaining ?? 0,
+            });
+          }
+        })
+        .catch(() => {});
+    }
+  }, [currentMode, isFreeUser]);
+
+  const handleBuildModeClick = () => {
+    if (isFreeUser) {
+      onOpenPaymentModal('plus');
+    } else {
+      onChangeMode('build');
+    }
+  };
+
   return (
     <header
       id="main-app-header"
@@ -199,7 +240,45 @@ export default function Header({
               <MessageSquare className="w-3.5 h-3.5 text-amber-600" />
               <span className="hidden sm:inline">General</span>
             </button>
+
+            <button
+              id="mode-btn-build"
+              type="button"
+              role="tab"
+              aria-selected={currentMode === 'build'}
+              onClick={handleBuildModeClick}
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs transition-all relative ${
+                currentMode === 'build'
+                  ? 'bg-[#FBF9F5] text-[#1F1E1D] font-semibold shadow-xs border border-[#E5E2DC]'
+                  : 'text-[#736E67] hover:text-[#1F1E1D] hover:bg-[#ECE8E1]'
+              }`}
+              title={
+                isFreeUser
+                  ? 'Build Mode (Plus / Pro required): Autonomous software factory. Click to upgrade.'
+                  : 'Build Mode: Autonomous planning, multi-pass generation, automated test harnesses & preview sandboxes'
+              }
+            >
+              <Hammer className="w-3.5 h-3.5 text-orange-600" />
+              <span className="hidden sm:inline">Build</span>
+              {isFreeUser && (
+                <Lock className="w-3 h-3 text-[#A8A29E] ml-0.5" />
+              )}
+            </button>
           </div>
+
+          {/* Remaining Build Daily Passes (When in Build Mode on Paid Tier) */}
+          {currentMode === 'build' && !isFreeUser && (
+            <div
+              id="build-passes-badge"
+              className="hidden xl:flex items-center gap-1.5 px-2 py-1 rounded-md bg-orange-50 border border-orange-200/80 text-[10px] font-medium text-orange-950"
+              title="Daily passes reset at midnight Nepal Time (UTC+05:45)"
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-orange-500 animate-pulse" />
+              <span>
+                Generate {buildPasses.generate} left &middot; Review {buildPasses.reviewRepair} left &middot; Polish {buildPasses.polish} left
+              </span>
+            </div>
+          )}
         </div>
 
         {/* Center: Multi-Tier Model Selector */}

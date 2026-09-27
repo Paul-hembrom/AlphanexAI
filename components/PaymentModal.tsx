@@ -162,7 +162,10 @@ export default function PaymentModal({
     };
 
     setSuccessReceipt(receipt);
-    onPaymentSuccess(selectedPlan.credits, selectedPlan.planType);
+    // TODO: Real eSewa/Khalti verification required to upgrade subscription plan_tier.
+    // Do NOT mark plan_tier paid on dummy QR success; keep users on lite.
+    // Credits apply only with an active Plus or Pro subscription.
+    onPaymentSuccess(selectedPlan.credits);
   };
 
   const resetModal = () => {
@@ -211,6 +214,14 @@ export default function PaymentModal({
           >
             <X className="w-5 h-5" />
           </button>
+        </div>
+
+        {/* Entitlement Policy Banner */}
+        <div className="px-5 py-2 bg-blue-50 border-b border-blue-200 text-xs text-blue-950 flex items-center gap-2">
+          <ShieldCheck className="w-4 h-4 text-blue-700 shrink-0" />
+          <span>
+            <strong>Subscription Policy:</strong> Credits apply only with an active Plus or Pro subscription. Buying credits on Free Tier does not unlock Plus models.
+          </span>
         </div>
 
         {/* Sandbox Notice Banner */}

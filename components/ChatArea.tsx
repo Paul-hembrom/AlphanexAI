@@ -37,6 +37,7 @@ import {
   WorkMode,
   ModelInfo,
   ChatAttachment,
+  PlanTier,
 } from '@/lib/types';
 import { SAMPLE_PROMPTS_BY_MODE, AVAILABLE_MODELS } from '@/lib/constants';
 import { detectFileType, tokenizeDiffLine } from '@/lib/code-detection';
@@ -56,6 +57,9 @@ interface ChatAreaProps {
   pendingAttachments?: ChatAttachment[];
   onRemoveAttachment?: (index: number) => void;
   onOpenRepoBrowser?: () => void;
+  userPlanTier?: PlanTier;
+  polishRemaining?: number;
+  onFinalReview?: (appName: string) => void;
 }
 
 export default function ChatArea({
@@ -73,6 +77,9 @@ export default function ChatArea({
   pendingAttachments = [],
   onRemoveAttachment,
   onOpenRepoBrowser,
+  userPlanTier = 'lite',
+  polishRemaining = 0,
+  onFinalReview,
 }: ChatAreaProps) {
   const [inputText, setInputText] = useState('');
   const [expandedThinking, setExpandedThinking] = useState<Record<string, boolean>>({});
@@ -289,6 +296,20 @@ export default function ChatArea({
                   </button>
                 ))}
               </div>
+
+              {currentMode === 'build' && onOpenRepoBrowser && (
+                <div className="pt-2 text-center">
+                  <button
+                    id="connect-github-btn"
+                    type="button"
+                    onClick={onOpenRepoBrowser}
+                    className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl border border-[#E5E2DC] bg-white hover:bg-[#F3EFEA] text-xs font-semibold text-[#1F1E1D] shadow-2xs transition-colors cursor-pointer"
+                  >
+                    <FolderGit2 className="w-4 h-4 text-[#736E67]" />
+                    <span>Connect GitHub to attach repo files</span>
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         ) : (
@@ -740,16 +761,35 @@ export default function ChatArea({
                             )}
                           </div>
 
-                          {onOpenWebPreview && message.webappBuild.buildStatus !== 'failed' && (
-                            <button
-                              type="button"
-                              onClick={() => onOpenWebPreview(message.webappBuild?.appName)}
-                              className="px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs transition-colors shadow-2xs flex items-center gap-1.5 shrink-0"
-                            >
-                              <span>Open Web Preview</span>
-                              <ExternalLink className="w-3.5 h-3.5" />
-                            </button>
-                          )}
+                          <div className="flex items-center gap-2">
+                            {/* Final review button: visible only in Build Mode for mid/upper with polish remaining */}
+                            {currentMode === 'build' &&
+                              (userPlanTier === 'mid' || userPlanTier === 'upper') &&
+                              polishRemaining > 0 &&
+                              message.webappBuild.buildStatus !== 'failed' && (
+                                <button
+                                  id={`final-review-btn-${message.id}`}
+                                  type="button"
+                                  onClick={() => onFinalReview?.(message.webappBuild?.appName || '')}
+                                  className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-neutral-950 font-bold text-xs transition-colors shadow-2xs flex items-center gap-1.5 shrink-0 cursor-pointer"
+                                  title={`Run frontier Polish pass with Claude Fable 5.1 (${polishRemaining} pass remaining today)`}
+                                >
+                                  <Sparkles className="w-3.5 h-3.5 text-neutral-950" />
+                                  <span>Final review</span>
+                                </button>
+                              )}
+
+                            {onOpenWebPreview && message.webappBuild.buildStatus !== 'failed' && (
+                              <button
+                                type="button"
+                                onClick={() => onOpenWebPreview(message.webappBuild?.appName)}
+                                className="px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs transition-colors shadow-2xs flex items-center gap-1.5 shrink-0"
+                              >
+                                <span>Open Web Preview</span>
+                                <ExternalLink className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
                         </div>
 
                         {message.webappBuild.verificationLog && message.webappBuild.verificationLog.length > 0 && (

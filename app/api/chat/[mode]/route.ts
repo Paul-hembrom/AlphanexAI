@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { GoogleGenAI } from '@google/genai';
-import { Citation, DiffData, WorkMode } from '@/lib/types';
+import { BuildStage, Citation, DiffData, PlanTier, WorkMode } from '@/lib/types';
+import { AVAILABLE_MODELS } from '@/lib/constants';
 import { getOpenRouterApiKey, streamOpenRouter } from '@/lib/openrouter';
 import { isAppBuildRequest, buildApplicationFromPrompt } from '@/lib/webapp-builder';
 import { isResearchQuery } from '@/lib/serper';
@@ -10,6 +11,17 @@ import { createAdminClient, isAdminConfigured } from '@/lib/supabase/admin';
 import { recordTokenUsage, checkPlanLimits, touchActiveSession } from '@/lib/usage-tracking';
 import { executeGitHubAction } from '@/lib/integrations';
 import { getValidGitHubToken } from '@/lib/user-connections';
+import { canUseModel } from '@/lib/plan-allowance';
+import {
+  checkBuildPass,
+  consumeBuildPass,
+  getBuildQuota,
+  checkFreeChatDailyQuota,
+} from '@/lib/build-quota';
+import {
+  resolveBuildStageModel,
+  filterRelevantFilesForBuildStage,
+} from '@/lib/build-router';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -113,6 +125,89 @@ export async function POST(
     touchActiveSession(authenticatedUserId).catch(() => {});
   }
 
+  // 3a. Build Mode is strictly locked for Free Tier (lite) users
+  if (mode === 'build' && userPlanTier === 'lite') {
+    return new Response(
+      `data: ${JSON.stringify({
+        type: 'content',
+        content: `### 🔒 Build Mode Locked\n\nBuild Mode is an autonomous software factory reserved for **Plus** and **Pro Builder** subscriptions.\n\nFree Tier accounts cannot run Build Mode. Please upgrade your subscription to unlock autonomous architecture planning, multi-pass generation, automated test harnesses, and preview sandboxes.`,
+      })}\n\ndata: ${JSON.stringify({
+        type: 'done',
+        modelId,
+        routedModel: modelId,
+        provider: 'AlphanexAI Build Router',
+        tokens: { promptTokens: 0, completionTokens: 0, totalTokens: 0, estimatedCostCredits: 0 },
+      })}\n\n`,
+      {
+        headers: {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          Connection: 'keep-alive',
+        },
+      }
+    );
+  }
+
+  // 3b. Free Tier Daily Chat Cap (30 completions/day across developer+researcher+general)
+  if (userPlanTier === 'lite' && authenticatedUserId) {
+    const freeDailyCheck = await checkFreeChatDailyQuota(authenticatedUserId);
+    if (!freeDailyCheck.allowed) {
+      return new Response(
+        `data: ${JSON.stringify({
+          type: 'content',
+          content: `### ⚠️ Daily Free Tier Limit Reached\n\n${freeDailyCheck.message}`,
+        })}\n\ndata: ${JSON.stringify({
+          type: 'done',
+          modelId,
+          routedModel: modelId,
+          provider: 'AlphanexAI Quota Engine',
+          tokens: { promptTokens: 0, completionTokens: 0, totalTokens: 0, estimatedCostCredits: 0 },
+        })}\n\n`,
+        {
+          headers: {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+            Connection: 'keep-alive',
+          },
+        }
+      );
+    }
+  }
+
+  // 3c. Free Tier & Mid Tier Model Restriction (Strict Entitlement Enforcement - No fake model routing)
+  const targetModelInfo = AVAILABLE_MODELS.find((m) => m.id === modelId);
+  if (targetModelInfo) {
+    const access = canUseModel({
+      planTier: userPlanTier as PlanTier,
+      modelTier: targetModelInfo.tier,
+    });
+    if (!access.allowed) {
+      return new Response(
+        `data: ${JSON.stringify({
+          type: 'content',
+          content: `### 🔒 Subscription Upgrade Required\n\n${access.reason}\n\nPlease upgrade your plan to access **${targetModelInfo.name}**.`,
+        })}\n\ndata: ${JSON.stringify({
+          type: 'done',
+          modelId,
+          routedModel: modelId,
+          provider: 'AlphanexAI Entitlement',
+          tokens: { promptTokens: 0, completionTokens: 0, totalTokens: 0, estimatedCostCredits: 0 },
+        })}\n\n`,
+        {
+          status: 403,
+          headers: {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+            Connection: 'keep-alive',
+          },
+        }
+      );
+    }
+  }
+
+  const effectiveModelId = modelId;
+  const modelWarningNotice: string | null = null;
+
   // 4. Load user profile settings for live research & grounding preferences
   let userProfileSettings = {
     searchProvider: 'serper_searxng' as 'tavily' | 'serper_searxng',
@@ -174,19 +269,170 @@ export async function POST(
       };
 
       try {
-        // Autonomous Studio Build & Sandbox Compiler (Real LLM Generation & Verification Loop)
-        if (isAppBuildRequest(prompt)) {
+        if (modelWarningNotice) {
+          sendEvent({
+            type: 'thinking',
+            content: modelWarningNotice,
+          });
+        }
+
+        // ==========================================
+        // WORK MODE: BUILD (Autonomous Software Factory)
+        // ==========================================
+        if (mode === 'build') {
+          // 1. Resolve stage
+          const isPolishRequested = body.polish === true || body.stage === 'polish';
+          const isRepairRequested = body.stage === 'repair' || body.hasPreviousFailure === true;
+          let stage: BuildStage = 'generate';
+          if (isPolishRequested) {
+            stage = 'polish';
+          } else if (isRepairRequested) {
+            stage = 'repair';
+          } else if (body.stage === 'plan') {
+            stage = 'plan';
+          }
+
+          // 2. Check stage quota
+          if (authenticatedUserId) {
+            const passCheck = await checkBuildPass(authenticatedUserId, userPlanTier as PlanTier, stage);
+            if (!passCheck.allowed) {
+              sendEvent({
+                type: 'content',
+                content: `### ⚠️ Daily Build Quota Exceeded\n\n${passCheck.message}`,
+              });
+              sendEvent({
+                type: 'done',
+                modelId: effectiveModelId,
+                routedModel: effectiveModelId,
+                provider: 'AlphanexAI Build Router',
+                tokens: { promptTokens: 0, completionTokens: 0, totalTokens: 0, estimatedCostCredits: 0 },
+              });
+              controller.close();
+              return;
+            }
+          }
+
+          const quotaStatus = authenticatedUserId
+            ? await getBuildQuota(authenticatedUserId, userPlanTier as PlanTier)
+            : null;
+          const polishQuotaRemaining = quotaStatus?.quotas?.polish?.remaining ?? 0;
+
+          // 3. Server-enforced stage model routing
+          const stageDecision = resolveBuildStageModel({
+            stage,
+            planTier: userPlanTier as PlanTier,
+            prompt,
+            hasPreviousFailure: body.hasPreviousFailure,
+            polishQuotaRemaining,
+            clientModelHint: effectiveModelId,
+          });
+
           sendEvent({
             type: 'routing',
-            modelId,
-            targetModel: `${modelId} (Studio Sandbox Builder)`,
+            modelId: stageDecision.modelId,
+            targetModel: `${stageDecision.modelId} (${stageDecision.provider})`,
+            provider: stageDecision.provider,
+            reasoningEffort,
+          });
+
+          sendEvent({
+            type: 'thinking',
+            content: `Build stage [${stage.toUpperCase()}]: routed to ${stageDecision.modelId} (${stageDecision.provider}). ${stageDecision.reason}`,
+          });
+
+          if (stageDecision.isPolishQuotaExhausted) {
+            sendEvent({
+              type: 'thinking',
+              content: `Daily Polish quota exhausted for today (0 remaining). Executing comprehensive review pass using Gemini 3.8 Flash.`,
+            });
+          }
+
+          // 4. Consume build pass in build_pass_log
+          if (authenticatedUserId) {
+            await consumeBuildPass(authenticatedUserId, stage, stageDecision.modelId);
+          }
+
+          // 5. Filter attachments for stage ingest (max ~8 relevant files)
+          const relevantAttachments = filterRelevantFilesForBuildStage(attachments, prompt, 8);
+
+          // 6. Run autonomous application builder
+          const buildResult = await buildApplicationFromPrompt({
+            prompt,
+            modelId: stageDecision.modelId,
+            stack: buildStack,
+            settings: userSettings,
+            onProgress: (progress) =>
+              sendEvent({
+                type: 'build_progress',
+                step: progress.step,
+                file: progress.file,
+                message: progress.message,
+              }),
+            onThinking: (thought) => sendEvent({ type: 'thinking', content: thought }),
+          });
+
+          const words = buildResult.summaryMarkdown.split(' ');
+          for (let i = 0; i < words.length; i += 4) {
+            const chunk = words.slice(i, i + 4).join(' ') + ' ';
+            sendEvent({ type: 'content', content: chunk });
+            await new Promise((r) => setTimeout(r, 15));
+          }
+
+          sendEvent({
+            type: 'webapp_build',
+            appName: buildResult.appName,
+            html: buildResult.html,
+            pages: buildResult.pages,
+            stack: buildResult.stack,
+            buildStatus: buildResult.buildStatus,
+            testsPassed: buildResult.testsPassed,
+            testsTotal: buildResult.testsTotal,
+            bugsFound: buildResult.bugsFound,
+            features: buildResult.features,
+            verificationLog: buildResult.verificationLog,
+            rawCodeRequested: buildResult.rawCodeRequested,
+            attemptsMade: buildResult.attemptsMade,
+            repairIterations: buildResult.repairIterations,
+          });
+
+          const promptTokensEst = Math.round(prompt.length / 4);
+          const completionTokensEst = Math.round((buildResult.html?.length || 500) / 4);
+
+          sendEvent({
+            type: 'done',
+            modelId: stageDecision.modelId,
+            routedModel: stageDecision.modelId,
+            provider: stageDecision.provider,
+            tokensUsed: {
+              promptTokens: promptTokensEst,
+              completionTokens: completionTokensEst,
+              totalTokens: promptTokensEst + completionTokensEst,
+              estimatedCostCredits: 2,
+            },
+          });
+
+          controller.close();
+          return;
+        }
+
+        // Autonomous Studio Build & Sandbox Compiler (Developer Mode Fallback)
+        if (isAppBuildRequest(prompt)) {
+          const devBuildModel =
+            userPlanTier === 'lite'
+              ? 'poolside/laguna-s-2.1:free'
+              : effectiveModelId;
+
+          sendEvent({
+            type: 'routing',
+            modelId: devBuildModel,
+            targetModel: `${devBuildModel} (Studio Sandbox Builder)`,
             provider: 'Autonomous Studio Engine',
             reasoningEffort,
           });
 
           const buildResult = await buildApplicationFromPrompt({
             prompt,
-            modelId,
+            modelId: devBuildModel,
             stack: buildStack,
             settings: userSettings,
             onProgress: (progress) =>
@@ -232,7 +478,7 @@ export async function POST(
               promptTokens: promptTokensEst,
               completionTokens: completionTokensEst,
               totalTokens: promptTokensEst + completionTokensEst,
-              estimatedCostCredits: mode === 'developer' ? 2 : 1,
+              estimatedCostCredits: 1,
             },
           });
 
@@ -424,7 +670,7 @@ export async function POST(
           try {
             await streamOpenRouter({
               apiKey: openRouterKey,
-              modelId,
+              modelId: effectiveModelId,
               prompt,
               mode,
               reasoningEffort,

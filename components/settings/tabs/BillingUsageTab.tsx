@@ -136,6 +136,14 @@ export default function BillingUsageTab({
         </p>
       </div>
 
+      {/* Subscription Credit Policy Banner */}
+      <div className="p-3.5 rounded-xl border border-blue-200 bg-blue-50/80 flex items-center gap-2.5 text-xs text-blue-950 font-medium">
+        <ShieldCheck className="w-4 h-4 text-blue-700 shrink-0" />
+        <span>
+          <strong>Subscription Policy:</strong> Credits apply only with an active Plus or Pro subscription. Buying credits on Free Tier does not unlock Plus models.
+        </span>
+      </div>
+
       {paymentSuccess && (
         <div className="p-3.5 rounded-xl border border-emerald-300 bg-emerald-50 flex items-center gap-2.5 text-xs text-emerald-900 font-semibold animate-in fade-in">
           <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />

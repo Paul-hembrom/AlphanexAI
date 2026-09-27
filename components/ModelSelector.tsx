@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { ModelInfo, ModelTier, WorkMode, ReasoningEffort, ResearchTier, RESEARCH_TIERS_META } from '@/lib/types';
 import { AVAILABLE_MODELS } from '@/lib/constants';
+import { resolvePlanTier, canUseModel } from '@/lib/plan-allowance';
 
 interface ModelSelectorProps {
   selectedModelId: string;
@@ -69,56 +70,23 @@ export default function ModelSelector({
   const [showSpecsModal, setShowSpecsModal] = useState(false);
   const [isEffortsMenuOpen, setIsEffortsMenuOpen] = useState(false);
 
-  // Check if user has active Pro subscription or Max subscription
-  const hasProSubscription = userPlan === 'Pro Builder' || userPlan === 'Pro' || userPlan === 'Max';
-  const hasMaxSubscription = userPlan === 'Max';
+  // Unified plan tier resolution: Free Tier -> lite, Plus/Starter -> mid, Pro Builder/Max -> upper
+  const userPlanTier = resolvePlanTier(userPlan);
+  const hasProSubscription = userPlanTier === 'upper';
+  const hasMaxSubscription = userPlanTier === 'upper';
+  const hasPlusSubscription = userPlanTier === 'mid' || userPlanTier === 'upper';
 
   const handleModelClick = (model: ModelInfo, tierEffort?: ReasoningEffort) => {
-    // Check access restrictions
-    if (model.tier === 'max' || model.tier === 'vault') {
-      // If user has Max subscription, native UI allocation
-      if (hasMaxSubscription) {
-        onSelectModel(model);
-        if (tierEffort && onChangeEffort) onChangeEffort(tierEffort);
-        setIsOpen(false);
-        return;
-      }
-      // If user only has Pro subscription (or lower) and has enough credits in wallet, use pay-per-use
-      if (userCredits >= model.costPerQueryCredits) {
-        onSelectModel(model);
-        if (tierEffort && onChangeEffort) onChangeEffort(tierEffort);
-        setIsOpen(false);
-        return;
-      }
-      // Otherwise prompt for top-up wallet / upgrade
+    // Check access strictly via canUseModel — Credits NEVER unlock paid models on Free Tier
+    const access = canUseModel({
+      planTier: userPlanTier,
+      modelTier: model.tier,
+      credits: userCredits,
+    });
+
+    if (!access.allowed) {
       setIsOpen(false);
-      onOpenPaymentModal('vault');
-      return;
-    }
-
-    if (model.tier === 'pro') {
-      if (!hasProSubscription && userCredits < model.costPerQueryCredits) {
-        setIsOpen(false);
-        onOpenPaymentModal('pro');
-        return;
-      }
-    }
-
-    if (model.tier === 'plus') {
-      if (userPlan === 'Free Tier' && userCredits < model.costPerQueryCredits) {
-        setIsOpen(false);
-        onOpenPaymentModal('pro');
-        return;
-      }
-    }
-
-    if (
-      model.tier === 'lite' &&
-      userCredits < model.costPerQueryCredits &&
-      userPlan === 'Free Tier'
-    ) {
-      setIsOpen(false);
-      onOpenPaymentModal('lite');
+      onOpenPaymentModal(access.suggestedAction === 'upgrade_pro' ? 'pro' : 'plus');
       return;
     }
 
@@ -612,7 +580,7 @@ export default function ModelSelector({
               </div>
               <div className="space-y-1.5 mt-0.5">
                 {proModels.map((model) => {
-                  const hasAccess = hasProSubscription || userCredits >= model.costPerQueryCredits;
+                  const hasAccess = hasProSubscription;
                   const isCurrent = selectedModelId === model.id;
                   return (
                     <div
@@ -729,7 +697,7 @@ export default function ModelSelector({
 
               <div className="space-y-1.5 mt-0.5">
                 {maxModels.map((model) => {
-                  const hasEnough = hasMaxSubscription || userCredits >= model.costPerQueryCredits;
+                  const hasEnough = hasProSubscription;
                   const isCurrent = selectedModelId === model.id;
                   return (
                     <div

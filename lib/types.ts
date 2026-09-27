@@ -1,4 +1,8 @@
-export type WorkMode = 'developer' | 'researcher' | 'general';
+export type WorkMode = 'developer' | 'researcher' | 'general' | 'build';
+
+export type PlanTier = 'lite' | 'mid' | 'upper';
+
+export type BuildStage = 'ingest' | 'plan' | 'generate' | 'test' | 'repair' | 'polish';
 
 export type ModelTier = 'free' | 'lite' | 'plus' | 'pro' | 'max' | 'pro_max' | 'vault';
 
@@ -204,10 +208,11 @@ export interface WorkspaceParams {
 
 export interface UserWallet {
   credits: number;
-  plan: 'Starter' | 'Pro Builder' | 'Free Tier' | 'Credit Vault Only';
+  plan: 'Starter' | 'Pro Builder' | 'Free Tier' | 'Credit Vault Only' | 'Plus' | 'Pro';
   activeUntil?: string;
   totalTokensUsed: number;
   planTokenLimit: number;
+  planTier?: PlanTier;
 }
 
 export type PaymentGateway = 'esewa' | 'khalti';
@@ -276,6 +281,7 @@ export interface UserProfileSettings {
   autoOpenDiffOnLargeChanges: boolean;
   displayInlineRunCodeButton: boolean;
   excludeFromModelTraining: boolean;
+  planTier?: PlanTier;
   updatedAt: string;
 }
 
