@@ -9,14 +9,14 @@ export interface GitHubPRRequest {
   filename?: string;
 }
 
-export interface GitHubActionResult {
+export interface GitHubActionResult<T = any> {
   success: boolean;
   action: string;
   prUrl?: string;
   prNumber?: number;
   branch?: string;
   repo?: string;
-  data?: unknown;
+  data?: T;
   message?: string;
   tokenSource?: string;
   needsAuth?: boolean;

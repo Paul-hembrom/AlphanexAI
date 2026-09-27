@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   X,
   Link2,
@@ -180,50 +180,51 @@ export default function MCPConnectorsModal({
   const [tokenInputError, setTokenInputError] = useState<string | null>(null);
   const [isSavingToken, setIsSavingToken] = useState(false);
 
+  // Fetch real status from /api/auth/status and /api/mcp/status
+  const refreshLiveStatus = useCallback(async () => {
+    try {
+      const authRes = await fetch('/api/auth/status');
+      if (authRes.ok) {
+        const authData = await authRes.json();
+        const gh = authData?.connections?.github;
+        const ggl = authData?.connections?.google;
+
+        setConnectors((prev) =>
+          prev.map((conn) => {
+            if (conn.id === 'github') {
+              const connected = Boolean(gh?.connected);
+              return {
+                ...conn,
+                status: connected ? 'connected' : 'disconnected',
+                tokenConfigured: connected,
+                username: gh?.username || null,
+              };
+            }
+            if (conn.id === 'google-docs' || conn.id === 'gmail') {
+              const connected = Boolean(ggl?.connected);
+              return {
+                ...conn,
+                status: connected ? 'connected' : 'disconnected',
+                tokenConfigured: connected,
+                accountEmail: ggl?.email || null,
+              };
+            }
+            return conn;
+          })
+        );
+      }
+    } catch (err) {
+      console.warn('[mcp-modal] Failed to fetch auth status:', err);
+    }
+  }, []);
+
   // Listen for OAuth messages and refresh status on modal open
   useEffect(() => {
     if (!isOpen) return;
 
-    let active = true;
-
-    const fetchStatus = async () => {
-      try {
-        const authRes = await fetch('/api/auth/status');
-        if (authRes.ok && active) {
-          const authData = await authRes.json();
-          const gh = authData?.connections?.github;
-          const ggl = authData?.connections?.google;
-
-          setConnectors((prev) =>
-            prev.map((conn) => {
-              if (conn.id === 'github') {
-                const connected = Boolean(gh?.connected);
-                return {
-                  ...conn,
-                  status: connected ? 'connected' : 'disconnected',
-                  tokenConfigured: connected,
-                  username: gh?.username || null,
-                };
-              }
-              if (conn.id === 'google-docs' || conn.id === 'gmail') {
-                const connected = Boolean(ggl?.connected);
-                return {
-                  ...conn,
-                  status: connected ? 'connected' : 'disconnected',
-                  tokenConfigured: connected,
-                  accountEmail: ggl?.email || null,
-                };
-              }
-              return conn;
-            })
-          );
-        }
-      } catch (err) {
-        console.warn('[mcp-modal] Failed to fetch auth status:', err);
-      }
-    };
-
-    void fetchStatus();
+    const timer = setTimeout(() => {
+      void refreshLiveStatus();
+    }, 0);
 
     const handleMessage = (event: MessageEvent) => {
       if (
@@ -231,16 +232,16 @@ export default function MCPConnectorsModal({
         event.data?.type === 'SUPABASE_AUTH_SUCCESS'
       ) {
         console.log('[mcp-modal] OAuth message received, refreshing connectors status');
-        void fetchStatus();
+        void refreshLiveStatus();
       }
     };
 
     window.addEventListener('message', handleMessage);
     return () => {
-      active = false;
+      clearTimeout(timer);
       window.removeEventListener('message', handleMessage);
     };
-  }, [isOpen]);
+  }, [isOpen, refreshLiveStatus]);
 
   const toggleConnector = (id: string) => {
     setConnectors((prev) =>

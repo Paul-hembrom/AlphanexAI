@@ -291,20 +291,22 @@ export async function POST(
                 let ingestedContext = `\n\n### Ingested GitHub Repository Context (${ghOwner}/${ghRepo}):\n`;
                 let hasIngestedData = false;
 
-                if (readmeResult.success && readmeResult.data?.content) {
+                const readmeData = readmeResult.data as { content?: string } | undefined;
+                if (readmeResult.success && readmeData?.content) {
                   hasIngestedData = true;
-                  ingestedContext += `#### README.md:\n\`\`\`markdown\n${readmeResult.data.content}\n\`\`\`\n\n`;
+                  ingestedContext += `#### README.md:\n\`\`\`markdown\n${readmeData.content}\n\`\`\`\n\n`;
                 }
 
-                if (treeResult.success && treeResult.data?.tree && Array.isArray(treeResult.data.tree)) {
+                const treeData = treeResult.data as { tree?: Array<{ type?: string; path?: string }> } | undefined;
+                if (treeResult.success && treeData?.tree && Array.isArray(treeData.tree)) {
                   hasIngestedData = true;
-                  const fileList = treeResult.data.tree
+                  const fileList = treeData.tree
                     .slice(0, 80)
-                    .map((node: any) => `${node.type === 'tree' ? '📁' : '📄'} ${node.path}`)
+                    .map((node) => `${node.type === 'tree' ? '📁' : '📄'} ${node.path}`)
                     .join('\n');
                   ingestedContext += `#### Repository File Structure (Top ${Math.min(
                     80,
-                    treeResult.data.tree.length
+                    treeData.tree.length
                   )} entries):\n\`\`\`\n${fileList}\n\`\`\`\n`;
                 }
 
